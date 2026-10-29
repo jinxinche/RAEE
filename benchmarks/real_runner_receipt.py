@@ -20,8 +20,10 @@ from raee_lite.evidence_binding import current_environment
 def create_receipt() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        (root / "app.py").write_text("def valid(x): return bool(x)\n", encoding="utf-8")
-        (root / "test_app.py").write_text("assert 1 == 1\n", encoding="utf-8")
+        # Byte-exact LF fixtures are required: Python text-mode writes may
+        # translate \n to CRLF on Windows, invalidating cross-OS SHA comparison.
+        (root / "app.py").write_bytes(b"def valid(x): return bool(x)\n")
+        (root / "test_app.py").write_bytes(b"assert 1 == 1\n")
         init(root)
         rid = add_requirement(root, "Signup rejects invalid addresses")
         set_expectation(root, rid, "unit")
