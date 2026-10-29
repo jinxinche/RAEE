@@ -47,6 +47,7 @@ def create_receipt() -> dict:
             "receipt_id": receipt["id"],
             "receipt_source_fingerprint": receipt["source_fingerprint"],
             "intent_digest_present": isinstance(receipt.get("requirement_digest"), str),
+            "requirement_digest": receipt.get("requirement_digest"),
             "observed_exit_code": receipt["observed_exit_code"],
             "same_runner_state": state,
             "hard_negative_harmless_tracked_change": {
