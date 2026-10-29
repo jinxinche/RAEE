@@ -6,6 +6,55 @@
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [Deutsch](docs/README.de-DE.md) · [Español](docs/README.es-ES.md)
 
+**Release:** `v0.10.0rc2` candidate · **License:** MIT · **Python:** 3.10+ · **No AI API key required for core offline checks**
+
+### A 30-second evidence-gap demo
+
+Install the reviewed candidate from [PR #2](https://github.com/jinxinche/RAEE/pull/2) in a disposable Python environment first, then try this inside an empty temporary project directory:
+
+```bash
+raee-lite init
+raee-lite add "Signup rejects invalid email addresses"
+raee-lite expect --for R1 --kind unit
+raee-lite status
+raee-lite check
+```
+
+Expected result: `R1: UNTESTED` and `EVIDENCE_GAPS`. **No repository-owned tests are executed.** A stated requirement is not evidence of its completion. See the [longer reproducible demo](examples/DEMO.md).
+
+<details>
+<summary>Where to find the source while this release is under review</summary>
+
+The CLI source currently lives in the review branch [`release/raee-lite-v0.10.0rc2`](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2), not yet on default `main`. Review the code and PR before installing:
+
+```bash
+git clone --branch release/raee-lite-v0.10.0rc2 https://github.com/jinxinche/RAEE.git
+cd RAEE
+python -m venv .venv
+# Activate .venv, then run:
+python -m pip install --no-deps .
+raee-lite --version
+```
+
+This is a source release candidate; **no PyPI availability or production security assurance is claimed**. The default nonexecuting commands are suitable for inspection; running project-owned checks requires explicit opt-in and a trusted environment.
+</details>
+
+### What you get—and what you do not
+
+| Observed evidence | What RAEE-Lite can report | What it cannot conclude |
+| --- | --- | --- |
+| Coding agent says a fix is done | Historical, **unverified** agent claim | That the code works |
+| Files changed | Diff and source-state fingerprint | That the requirement was satisfied |
+| Unit test returns exit 0 | Which test ran, on which source state | That the test covered the required behavior |
+| Source modified after testing | Previously observed evidence becomes stale | That all hidden failures are detected |
+| CI provenance signature verified | Authenticity of an attested claim | General absence of defects |
+
+**Why this matters:** In AI-assisted coding, green tests are often mistaken for verified user intent. RAEE-Lite deliberately reports the **unverified gap** instead of manufacturing confidence.
+
+[How the evidence model works](examples/EVIDENCE_CONTRACTS.md) · [Security boundaries](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Release review](docs/SOLO_MAINTAINER_VALIDATION.md)
+
+
+
 ## Why this project?
 
 AI coding agents can generate, change, and test code quickly. But a successful command, a reassuring agent message, or a green checkmark does **not** necessarily establish that a user's requirement was fulfilled.
@@ -35,9 +84,9 @@ The design distinguishes **an agent's claim**, **a locally observed command**, a
 
 ## Getting started
 
-**Publication status:** This newly created public repository is being prepared for its first source release. The CLI source and installable package are **not yet published in this repository**. The commands below document the development candidate's intended local workflow; do not treat them as an install-from-GitHub instruction yet.
+**Publication status:** Source code is public on the review branch linked above; the default branch still awaits reviewed release integration. Do not claim stable release, independently verified provenance, or PyPI publication.
 
-After installing the release candidate from a reviewed local source package:
+After installing a reviewed release candidate:
 
 ```bash
 raee-lite preflight     # Read-only inspection
@@ -70,7 +119,7 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 
 The near-term priorities are a reviewed public source release, real GitHub Actions results on Linux/Windows/macOS, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
-**Current status: documentation and first public release preparation.** Please do not interpret the README as a claim of production readiness.
+**Current status: public source under PR review; real cross-platform trusted CI and independent provenance acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
 
 ## Contributing and license
 
