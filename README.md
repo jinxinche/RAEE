@@ -39,6 +39,10 @@ raee-lite --version
 This is a source release candidate; **no PyPI availability or production security assurance is claimed**. The default nonexecuting commands are suitable for inspection; running project-owned checks requires explicit opt-in and a trusted environment.
 </details>
 
+### New: proof-obligation trace (experimental)
+
+`raee-lite trace --for R1 --json` emits a **read-only evidence graph** connecting user intent, each declared verification scope, its last self-labelled execution receipt, and source fingerprint relevance. Missing, stale, partial and failed scopes remain explicit; even an `OBSERVED_PASS` never becomes a semantic correctness proof. [Trace example and graph semantics](docs/PROOF_OBLIGATION_TRACE.md).
+
 ### What you get—and what you do not
 
 | Observed evidence | What RAEE-Lite can report | What it cannot conclude |
