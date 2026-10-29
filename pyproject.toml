@@ -15,7 +15,17 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Environment :: Console",
   "Topic :: Software Development :: Testing",
+  "Topic :: Software Development :: Quality Assurance",
+  "License :: OSI Approved :: MIT License",
+  "Development Status :: 3 - Alpha",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jinxinche/RAEE"
+Source = "https://github.com/jinxinche/RAEE"
+Documentation = "https://github.com/jinxinche/RAEE#readme"
+Issues = "https://github.com/jinxinche/RAEE/issues"
+Changelog = "https://github.com/jinxinche/RAEE/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 attest = ["cryptography>=42"]
