@@ -6,6 +6,39 @@
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [Deutsch](docs/README.de-DE.md) · [Español](docs/README.es-ES.md)
 
+### Try the public release candidate
+
+**Status: public source preview, not a stable or security-certified release.** The code is available in the [v0.10.0rc2 review branch](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) and [release PR #2](https://github.com/jinxinche/RAEE/pull/2), while the default `main` branch is still awaiting the reviewed source merge. The candidate has local test results, but protected-main cross-platform CI and independent GitHub attestation verification remain pending.
+
+Try it from a **disposable Python environment**, after inspecting the source:
+
+```bash
+git clone --branch release/raee-lite-v0.10.0rc2 https://github.com/jinxinche/RAEE.git
+cd RAEE
+python -m venv .venv
+# Activate the venv using your platform's standard command
+python -m pip install --no-deps .
+raee-lite --version
+```
+
+Inside a fresh, disposable project directory:
+
+```bash
+raee-lite init
+raee-lite add "Signup rejects invalid email addresses"
+raee-lite expect --for R1 --kind unit
+raee-lite status
+raee-lite check
+```
+
+**Expected:** `R1: UNTESTED` and an evidence-gap report. `status` intentionally returns exit code 1 while the requirement has no matching verification evidence; this is not a crash. The nonexecuting `check` command does not run repository-owned tests.
+
+**What makes it useful:** Coding agents' statements, changed files, executed checks and unresolved requirements are *different evidence types*. RAEE-Lite keeps them separate rather than treating a green test as proof that a requested feature works.
+
+[Reproduction details](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/examples/DEMO.md) · [Security boundaries](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/SECURITY.md) · [Report a reproducible issue](https://github.com/jinxinche/RAEE/issues/new) · [Local validation and pending release gates](https://github.com/jinxinche/RAEE/pull/2)
+
+
+
 ## Why this project?
 
 AI coding agents can generate, change, and test code quickly. But a successful command, a reassuring agent message, or a green checkmark does **not** necessarily establish that a user's requirement was fulfilled.
@@ -35,7 +68,7 @@ The design distinguishes **an agent's claim**, **a locally observed command**, a
 
 ## Getting started
 
-**Publication status:** This newly created public repository is being prepared for its first source release. The CLI source and installable package are **not yet published in this repository**. The commands below document the development candidate's intended local workflow; do not treat them as an install-from-GitHub instruction yet.
+**Publication status:** The installable CLI source is accessible in the linked review branch, not yet merged into the default branch. No stable GitHub release or PyPI distribution is claimed.
 
 After installing the release candidate from a reviewed local source package:
 
@@ -70,7 +103,7 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 
 The near-term priorities are a reviewed public source release, real GitHub Actions results on Linux/Windows/macOS, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
-**Current status: documentation and first public release preparation.** Please do not interpret the README as a claim of production readiness.
+**Current status: public release candidate available for early feedback; independent security review and cross-platform signed CI acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
 
 ## Contributing and license
 
