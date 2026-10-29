@@ -6,6 +6,7 @@
 - Ensure official signing uses an explicit, non-hidden allowlisted handoff: `ci-evidence.json` plus original `report.json`.
 - Independent verification requires the raw report and cross-checks its SHA-256; absent RAEE CLI, use a bounded local fallback.
 - Changed/new symlink files and symlinked directories now require review on untrusted PRs.
+- **Security hotfix (pending PR #4):** the trusted PR inspector now fingerprints symlink **target text** so changing an existing file/directory link cannot pass as unchanged; directory symlinks also count toward the bounded inventory limit. Four additional regression tests; targeted local full-suite result 188/188 PASS. This fix is not live on protected `main` until the separate PR #4 is merged and verified.
 - Added negative version, file handoff and local adversarial PR smoke tests; no real cloud attestation or fork-run claim.
 
 ## 0.10.0rc1 — Quality & developer experience release candidate
