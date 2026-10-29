@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 from . import core
+from .evidence_binding import evaluate_binding
 
 KINDS = ("unit", "integration", "e2e", "typecheck", "lint", "build", "smoke", "security")
 
@@ -44,7 +45,7 @@ def suggestions(description: str) -> list[dict]:
     return [{"kind": kind, "reason": reason} for kind, pattern, reason in HINTS if pattern.search(description)]
 
 
-def assess_contracts(root: Path, source: dict) -> list[dict]:
+def assess_contracts(root: Path, source: dict, *, target_environment: dict | None = None) -> list[dict]:
     manifest = core.get_manifest(root)
     ledger = core.read_json(root / core.LEDGER, {"schema": 1, "runs": []})
     runs = ledger.get("runs", [])
@@ -64,6 +65,9 @@ def assess_contracts(root: Path, source: dict) -> list[dict]:
             elif last.get("source_fingerprint") != source["sha256"] or last.get("source_fingerprint_after") != last.get("source_fingerprint"):
                 status = "STALE"
                 gaps.append({"kind": kind, "reason": "The last check does not match the current source snapshot."})
+            elif evaluate_binding(last, req["description"], target_environment=target_environment) != "BINDING_MATCHED":
+                status = evaluate_binding(last, req["description"], target_environment=target_environment)
+                gaps.append({"kind": kind, "reason": "Evidence binding is absent, the requirement changed, or target environment is unverified."})
             elif last.get("observed_exit_code") != 0:
                 status = "FAILED"
                 gaps.append({"kind": kind, "reason": "The last check returned a nonzero exit code."})

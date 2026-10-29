@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     trace_parser = sub.add_parser("trace", help="Explain the declared evidence graph and exact unproven obligations (read only)")
     trace_parser.add_argument("--for", dest="requirement", help="Trace one declared requirement ID; default: all")
     trace_parser.add_argument("--json", action="store_true", help="Machine-readable evidence graph; never a coverage proof")
+    trace_parser.add_argument("--target-os", help="Target OS identity, requires --target-python")
+    trace_parser.add_argument("--target-python", help="Target Python version, requires --target-os")
     sub.add_parser("report", help="Generate JSON, Markdown, HTML and SARIF reports")
     sub.add_parser("status", help="Inspect current evidence and freshness")
     imp = sub.add_parser("import-agent", help="Explicitly import a local Codex/Claude JSONL transcript; logs do not pass contracts")
@@ -218,7 +220,14 @@ def main(argv: list[str] | None = None) -> int:
             print(plan_text(report))
             return 0
         if args.action == "trace":
-            result = obligation_trace(audit(root), requirement_id=args.requirement)
+            if bool(args.target_os) != bool(args.target_python):
+                raise ValueError("Supply both --target-os and --target-python")
+            report = audit(root)
+            if args.target_os:
+                from .contracts import assess_contracts
+                report["evidence_contracts"] = assess_contracts(root, report["source"],
+                    target_environment={"os": args.target_os, "python": args.target_python})
+            result = obligation_trace(report, requirement_id=args.requirement)
             print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else format_obligation_trace(result))
             return 0
         if args.action == "preflight":
