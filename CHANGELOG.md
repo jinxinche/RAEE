@@ -1,5 +1,10 @@
 # Changelog
 
+## Candidate method addition (not separately released)
+
+- Added offline, read-only `raee-lite trace` with typed proof-obligation nodes/edges, explicit missing/stale/failed/partial causes, and no automatic promotion of self-declared checks into correctness proofs.
+- New JSON trace schema `raee.proof_obligation_trace.v1` and eight focused negative-control tests. Cross-platform CI and independent audit remain release gates.
+
 ## 0.10.0rc2 — Provenance verification and evidence handoff hardening
 
 - Reject GitHub CLI versions earlier than 2.97.0 during attestation verification (CVE-2026-64655).
