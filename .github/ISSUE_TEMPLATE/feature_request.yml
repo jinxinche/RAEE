@@ -1,0 +1,27 @@
+name: "Feature request — evidence use case"
+description: "Suggest a small, testable enhancement to role-aware verification evidence."
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: User problem
+      description: "Which real evidence gap is missing from the current workflow?"
+      placeholder: "An agent claims ..., but the report cannot distinguish ..."
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behavior and acceptance test
+      description: "What should be measured and what must remain explicitly unverified?"
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: "I will not include credentials, private agent conversations or proprietary code."
+          required: true
