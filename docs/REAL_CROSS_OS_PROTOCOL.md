@@ -8,11 +8,17 @@ The branch has a deliberately branch-limited workflow:
 [`experimental-real-os-matrix.yml`](../.github/workflows/experimental-real-os-matrix.yml).
 
 It requests six **actual GitHub-hosted runners**:
-`ubuntu-latest`, `windows-latest`, `macos-latest` × Python `3.10` and `3.13`.
+`ubuntu-latest`, `windows-latest`, **`macos-15-intel`** × Python `3.10` and `3.13`.
+
+The macOS label is now **fixed to macOS 15 Intel (x86-64)** rather than floating `macos-latest` (macOS 26 ARM64 in October 2026). The exact OS image release and architecture are printed at runtime and the interpreter version is asserted. This is a controlled change in experimental platform: a passing macOS 15 Intel run must **not** be described as a passing macOS 26 ARM64 run.
 
 Each job must produce a distinct `receipt-<os>-py<version>` artifact from a temporary fixture directory. The final `aggregate` job refuses to run without all six successful jobs. It requires six unique real `platform/sys.version` pairs and a common source fingerprint. Download the `real-cross-os-metrics` artifact and examine `real-cross-os-metrics.json`.
 
-**IMPORTANT:** At authorship time, a real six-job run and its metrics have **not been observed** through the connected GitHub interface. The GitHub PR's **green boundary scanner** proves neither matrix execution nor acceptance.
+**Current failure observation (reported 2026-10-30):** `macos-latest/3.10` failed after approximately 41 s; `macos-latest/3.13` failed after approximately 7 s; `windows-latest/3.13` succeeded after approximately 15 s. These are job-level statuses reported by the maintainer, not a downloaded failure log or an accepted six-job matrix. The precise macOS error/step was not accessible through the connected GitHub workflow-run list. The macOS migration is a plausible compatibility variable, **not a proven root cause**. Linux and Windows 3.10 results were not supplied; do not infer them.
+
+**Follow-up fixes on this branch:** pinned macOS 15 Intel for repeatability; added runner image/architecture, actual Python version and 64-bit assertions; explicitly failed (without uploading a valid receipt) when setup/receipt fails; changed the fixture's `app.py` and `test_app.py` to **byte-exact LF** output using `write_bytes`. Python text-mode writes can otherwise change LF to CRLF on Windows, corrupting the cross-OS *same-source* comparison. Added fail-closed aggregator unit tests. All fixes still require actual GitHub Actions results.
+
+**IMPORTANT:** No newly successful six-job run and verified aggregate metrics have yet been observed. A green PR boundary scan does not prove them.
 
 ## Expected 48 evaluation opportunities
 
@@ -41,3 +47,17 @@ PYTHONPATH=src python benchmarks/aggregate_real_matrix.py --input runner-receipt
 ```
 
 The aggregate command **must fail** when only a local receipt is present. Do not fill missing windows/macOS outcomes with synthetic labels.
+
+## Retrieve specific failure evidence
+
+With an authenticated GitHub CLI:
+
+```bash
+gh run list -R jinxinche/RAEE -w experimental-real-os-matrix.yml --limit 10
+gh run view <RUN_ID> -R jinxinche/RAEE --log-failed
+gh run view <RUN_ID> -R jinxinche/RAEE --json jobs,status,conclusion,headSha
+```
+
+For a successful completed run, download the `real-cross-os-metrics` artifact and verify `n_runners=6`, `n_cases=48`, source fingerprint identity and that failures were **not** silently filled with synthetic receipts. The individual job logs must show real runner image and actual interpreter details for both Python versions. If the pinned macOS 15 Intel jobs fail, preserve their step logs and diagnose the specific failing step rather than changing another OS label by guesswork.
+
+Do not merge this experimental workflow into protected `main` as a substitute for production release CI or signed provenance.
