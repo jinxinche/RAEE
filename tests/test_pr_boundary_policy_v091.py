@@ -32,7 +32,7 @@ class PRBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);(root/'base').mkdir();(root/'head').mkdir()
             (root/'head'/'leak').symlink_to('/etc/passwd')
-            s=MOD.snapshot(root/'head'); self.assertEqual(s['leak'],'symlink')
+            s=MOD.snapshot(root/'head'); self.assertTrue(s['leak'].startswith('symlink:'))
     def test_new_symlink_files_and_directories_require_review(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); (root/'base').mkdir(); (root/'head').mkdir()
