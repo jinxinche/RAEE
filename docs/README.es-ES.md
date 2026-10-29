@@ -4,6 +4,9 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
+**Demostración en 30 segundos (versión candidata):** Tras instalar el [código candidato revisado](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) en un entorno aislado, ejecuta `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit`, `raee-lite status`. Resultado: `UNTESTED`; no se ejecutan pruebas del proyecto. Todavía no hay versión estable.
+
+
 ## ¿Por qué RAEE-Lite?
 
 Herramientas como Codex, Claude Code y Cursor pueden modificar código rápidamente. Sin embargo, que el agente afirme haber corregido algo, que una prueba termine con código de salida 0 y que se haya satisfecho una necesidad del usuario son **afirmaciones distintas**.

@@ -1,0 +1,71 @@
+# v0.8 REFERENCE ONLY. Enable AFTER protecting 'main', reviewing all action versions,
+# pinning action revisions to immutable vetted SHAs, and testing in a disposable repo.
+# The signature proves GitHub workflow provenance, NOT code correctness.
+name: RAEE trusted evidence
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: trusted-evidence-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2; persist-credentials=false
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install trusted branch code (NOT on PR)
+        run: python -m pip install --no-deps .
+      - name: Execute explicitly approved regression check
+        run: |
+          raee-lite init
+          raee-lite add "Regression suite executes successfully"
+          raee-lite expect --for R1 --kind unit
+          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 150
+          raee-lite report
+        env:
+          CI: 'true'
+      - name: Export bounded CI claim (NOT yet authenticated)
+        env:
+          CI: 'true'
+          GITHUB_ACTIONS: 'true'
+        run: |
+          raee-lite ci-export \
+            --expected-repo "$GITHUB_REPOSITORY" \
+            --trusted-ref refs/heads/main \
+            --workflow .github/workflows/trusted-evidence.yml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: raee-ci-evidence-claim
+          path: .raee/ci-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+  sign:
+    needs: collect
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      # Pin each of these tags to reviewed full SHAs before production use.
+      # No checkout and no repository-owned scripts in this privileged job.
+      - uses: actions/download-artifact@v4
+        with:
+          name: raee-ci-evidence-claim
+          path: signed
+      - uses: actions/attest@v4
+        with:
+          subject-path: signed/ci-evidence.json

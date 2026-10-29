@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raee-lite"
+version = "0.10.0rc2"
+description = "Role-aware verification evidence with reproducible trust and compatibility validation for AI-assisted coding"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "RAEE-Lite contributors"}]
+keywords = ["ai-coding", "evidence", "verification", "cli", "code-review", "reproducibility", "llm", "coding-agents"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Topic :: Software Development :: Testing",
+  "Topic :: Software Development :: Quality Assurance",
+  "Development Status :: 3 - Alpha",
+]
+
+[project.urls]
+Homepage = "https://github.com/jinxinche/RAEE"
+Source = "https://github.com/jinxinche/RAEE"
+Documentation = "https://github.com/jinxinche/RAEE#readme"
+Issues = "https://github.com/jinxinche/RAEE/issues"
+Changelog = "https://github.com/jinxinche/RAEE/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+attest = ["cryptography>=42"]
+
+[project.scripts]
+raee-lite = "raee_lite.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+raee_lite = ["skill_template.md"]

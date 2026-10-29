@@ -4,6 +4,9 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
+**30-Sekunden-Demo (Release Candidate):** Nach Installation des [geprüften Quellcode-Kandidaten](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) in einer isolierten Umgebung: `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit`, `raee-lite status`. Ergebnis: `UNTESTED`; keine Projekttests werden ausgeführt. Noch keine stabile Veröffentlichung.
+
+
 ## Wozu RAEE-Lite?
 
 KI-Programmierwerkzeuge wie Codex, Claude Code oder Cursor können Code schnell verändern. Eine Erfolgsmeldung des Agents, ein Test mit Exit-Code 0 und die tatsächliche Erfüllung einer Nutzeranforderung sind jedoch **nicht dasselbe**.
