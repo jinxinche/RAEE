@@ -11,6 +11,7 @@ import sys
 import time
 from .safe_io import safe_read_json, write_json as atomic_json
 from .evidence_binding import intent_digest
+from .dependency_scope import snapshot as declared_dependency_snapshot
 from .safe_process import run as bounded_run
 from datetime import datetime, timezone
 from pathlib import Path
@@ -208,7 +209,9 @@ def add_boundary(root: Path, description: str) -> None:
     write_json(root / MANIFEST, m)
 
 
-def run_check(root: Path, requirement: str, command: list[str], timeout: int, kind: str | None = None) -> dict:
+def run_check(root: Path, requirement: str, command: list[str], timeout: int, kind: str | None = None,
+              *, dependency_files: list[str] | None = None,
+              external_revisions: dict[str, str] | None = None) -> dict:
     if kind is not None:
         from .contracts import KINDS
         if kind not in KINDS:
@@ -222,10 +225,22 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
     if timeout <= 0:
         raise ValueError("Timeout must be positive")
     ledger = read_json(root / LEDGER, {"schema": 1, "runs": []})
+    if external_revisions is not None and dependency_files is None:
+        raise ValueError("External revisions require explicit dependency files")
     before = fingerprint(root)
+    scoped_before = (declared_dependency_snapshot(root, dependency_files, external_revisions)
+                     if dependency_files is not None else None)
     code, exception_text, duration = bounded_run(command, root, timeout)
     out_hash, err_hash = None, None  # no raw terminal output read, even transiently
     after = fingerprint(root)
+    scoped_after = None
+    if scoped_before is not None:
+        try:
+            scoped_after = declared_dependency_snapshot(root, dependency_files, external_revisions)
+        except ValueError:
+            # An executed command may remove or invalidate a scoped input.
+            # Retain its process receipt but refuse to carry over the binding.
+            scoped_after = {"state": "UNAVAILABLE_AFTER_EXECUTION"}
     entry = {
         "id": f"E{len(ledger['runs']) + 1}", "role": "verification",
         "requirement": requirement, "requirement_digest": intent_digest(next(r["description"] for r in m["requirements"] if r["id"] == requirement)), "command": ["[explicit command redacted]"],
@@ -242,6 +257,8 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
         "environment": {"python": sys.version.split()[0], "os": platform.platform()},
         "change": git_context(root),
     }
+    if scoped_before is not None:
+        entry["dependency_scope"] = {"before": scoped_before, "after": scoped_after}
     ledger["runs"].append(entry)
     write_json(root / LEDGER, ledger)
     return entry
