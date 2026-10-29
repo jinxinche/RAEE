@@ -4,6 +4,9 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
+**Código candidato disponible públicamente:** [rama v0.10.0rc2](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [PR #2](https://github.com/jinxinche/RAEE/pull/2). El código todavía **no está integrado en `main`**. No se afirma una versión estable, publicación en PyPI ni certificación independiente de procedencia. En un entorno aislado, prueba `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` y `raee-lite status`. Resultado: `UNTESTED`; el estado 1 indica una carencia de evidencias, no un fallo del programa.
+
+
 ## ¿Por qué RAEE-Lite?
 
 Herramientas como Codex, Claude Code y Cursor pueden modificar código rápidamente. Sin embargo, que el agente afirme haber corregido algo, que una prueba termine con código de salida 0 y que se haya satisfecho una necesidad del usuario son **afirmaciones distintas**.
