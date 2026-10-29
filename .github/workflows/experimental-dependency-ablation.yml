@@ -99,6 +99,12 @@ jobs:
           PYTHONPATH: src
         run: |
           python -m unittest discover -s tests -p 'test_real_cross_os_protocol.py' -v
+      - name: Run reviewed full Python regression suite on trusted experiment aggregator
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          python scripts/run_reviewed_suite.py --min-tests 150
       - name: Aggregate actual six-runner evidence, fail if missing
         shell: bash
         env:
