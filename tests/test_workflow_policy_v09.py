@@ -40,6 +40,8 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn('windows-latest',s)
         self.assertIn('macos-latest',s)
         self.assertIn('python scripts/run_reviewed_suite.py --min-tests 150',s)
+        self.assertIn('python scripts/local_pr_attack_smoke.py',s)
+        self.assertIn("if: matrix.os == 'ubuntu-latest'",s)
         self.assertIn('validate-corpus',s)
         self.assertNotIn('raee-lite check --ci',s)
 
