@@ -13,6 +13,10 @@ _REMEDY = {
     "STALE": "Re-run the declared check against the current source snapshot and inspect its assertions.",
     "FAILED": "Investigate the nonzero check result; do not reuse an earlier passing receipt.",
     "PARTIAL": "Review unhashed inputs and fingerprint limits before relying on this receipt.",
+    "INTENT_UNBOUND": "Re-run check with explicit intent binding; legacy evidence cannot prove unchanged requirement text.",
+    "INTENT_CHANGED": "Requirement text changed; re-declare target and rerun check.",
+    "ENVIRONMENT_UNBOUND": "Execution environment metadata missing; rerun in a known target environment.",
+    "ENVIRONMENT_SHIFT_UNVERIFIED": "Receipt is from another Python/OS environment; validate on target runner.",
     "OBSERVED_PASS": "Review whether the self-declared check actually exercises the requirement; exit zero alone is insufficient.",
 }
 
