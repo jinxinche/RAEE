@@ -32,6 +32,27 @@ def fake_receipt(os_name, py_version, *, fingerprint="same-fixture-sha"):
         "requirement_digest": intent_digest("Signup rejects invalid addresses"),
         "observed_exit_code": 0,
         "same_runner_state": "OBSERVED_PASS",
+        "ablation": {
+            "initial_scoped_state": "OBSERVED_PASS",
+            "irrelevant_note_change": {
+                "ground_truth_revoke": False,
+                "global": "STALE",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "OBSERVED_PASS",
+            },
+            "external_revision_change": {
+                "ground_truth_revoke": True,
+                "global": "OBSERVED_PASS",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "EXTERNAL_STATE_CHANGED",
+            },
+            "relevant_source_change": {
+                "ground_truth_revoke": True,
+                "global": "STALE",
+                "scoped_files": "DEPENDENCY_SOURCE_CHANGED",
+                "scoped_plus_external": "DEPENDENCY_SOURCE_CHANGED",
+            },
+        },
         "hard_negative_harmless_tracked_change": {
             "ground_truth_revoke": False,
             "observed_state": "STALE",
@@ -73,6 +94,14 @@ class RealMatrixContract(unittest.TestCase):
         self.assertEqual((m["TP"], m["FP"], m["TN"], m["FN"]), (30, 6, 6, 6))
         self.assertGreater(m["false_positive_rate"], 0)
         self.assertGreater(m["false_negative_rate"], 0)
+        # Synthetic aggregator unit fixture: not a cloud observation.
+        self.assertEqual(
+            [(m["ablation"][name]["TP"], m["ablation"][name]["FP"],
+              m["ablation"][name]["TN"], m["ablation"][name]["FN"])
+             for name in ("global", "scoped_files", "scoped_plus_external")],
+            [(30, 6, 6, 6), (30, 0, 12, 6), (36, 0, 12, 0)])
+        for item in m["ablation"].values():
+            self.assertEqual(item["relevant_source_revoked"], 6)
 
     def test_missing_runner_is_not_silently_accepted(self):
         self.populate(missing=2)
