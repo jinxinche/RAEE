@@ -87,6 +87,12 @@ jobs:
           pattern: receipt-*
           path: runner-receipts
           merge-multiple: false
+      - name: Test matrix fail-closed invariants and macOS temporary path safety
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p 'test_real_cross_os_protocol.py' -v
       - name: Aggregate actual six-runner evidence, fail if missing
         shell: bash
         env:
