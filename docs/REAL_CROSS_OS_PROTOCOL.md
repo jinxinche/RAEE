@@ -22,7 +22,9 @@ Each job must produce a distinct `receipt-<os>-py<version>` artifact from a temp
 
 **Root cause confirmed from actual failed macOS logs:** `safe_io._reject_links()` refused an OS-managed symlink in the **temporary directory parent chain** (e.g. macOS `/var` → `/private/var`) at `core.init(root)`. It was not a `setup-python` error. The benchmark was corrected to canonicalize its **owned, freshly created** temporary root using `Path(tmp).resolve(strict=True)`. `safe_io.py` was **not** weakened. A dedicated symlink-parent regression test was added. The separate Windows CRLF-vs-LF fixture inconsistency was prevented via byte-identical `write_bytes`.
 
-**Scope:** The completed six-runner evidence tests **macOS 15 Intel, not macOS 26 ARM64**. Earlier failures on ARM64 had the same error but a post-fix ARM64 pass has not yet been observed. The metric definitions are prespecified synthetic relevance/transfer judgments; neither full semantic test adequacy nor independent signed provenance is established.
+**Scope:** The six-runner aggregation reports **macOS 15 Intel**; it does not include ARM64 observations in its 48-pair metrics. Separately, the [supplemental macOS 26 ARM64 Run](https://github.com/jinxinche/RAEE/actions/runs/40973047054) completed **2/2 successful native ARM64 receipt jobs**. Its actual runner logged macOS 26.6.2 ARM64, CPython 3.10.11 and 3.13.16, 64-bit, plus `same_runner_state: OBSERVED_PASS` in both cases. This directly retests the original macOS ARM64 failing configuration after the safe temporary-directory canonicalization fix, but the two new ARM receipts were **not** added to the six-runner aggregate. The metric definitions use synthetic relevance/transfer judgments; neither semantic test adequacy nor independent signed provenance is established.
+
+A later [enhanced six-runner matrix](https://github.com/jinxinche/RAEE/actions/runs/40972861758) also passed all seven jobs, with the new protocol regression suite **7/7 PASS** inside the aggregate job.
 
 ## Expected 48 evaluation opportunities
 
