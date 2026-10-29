@@ -20,7 +20,7 @@ raee-lite status
 raee-lite check
 ```
 
-Expected result: `R1: UNTESTED` and `EVIDENCE_GAPS`. **No repository-owned tests are executed.** A stated requirement is not evidence of its completion. See the [longer reproducible demo](examples/DEMO.md).
+Expected result: `R1: UNTESTED` and `EVIDENCE_GAPS`. **No repository-owned tests are executed.** With an unverified requirement, `raee-lite status` intentionally exits with status **1**; that is an evidence-gap signal, not a CLI crash. The subsequent nonexecuting `raee-lite check` returns status **0** in the demonstrated case. A stated requirement is not evidence of its completion. See the [longer reproducible demo](examples/DEMO.md).
 
 <details>
 <summary>Where to find the source while this release is under review</summary>
