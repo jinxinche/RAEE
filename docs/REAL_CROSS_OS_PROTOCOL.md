@@ -18,7 +18,11 @@ Each job must produce a distinct `receipt-<os>-py<version>` artifact from a temp
 
 **Follow-up fixes on this branch:** pinned macOS 15 Intel for repeatability; added runner image/architecture, actual Python version and 64-bit assertions; explicitly failed (without uploading a valid receipt) when setup/receipt fails; changed the fixture's `app.py` and `test_app.py` to **byte-exact LF** output using `write_bytes`. Python text-mode writes can otherwise change LF to CRLF on Windows, corrupting the cross-OS *same-source* comparison. Added fail-closed aggregator unit tests. All fixes still require actual GitHub Actions results.
 
-**IMPORTANT:** No newly successful six-job run and verified aggregate metrics have yet been observed. A green PR boundary scan does not prove them.
+**Completed real GitHub matrix evidence (2026-10-29 UTC):** [Run #8](https://github.com/jinxinche/RAEE/actions/runs/40972501262) on commit [`e7f2ee0`](https://github.com/jinxinche/RAEE/commit/e7f2ee0ed16bed8a1ccdf8345f143b06ebbf11bf) completed **six successful local execution receipt jobs plus one successful aggregate job**. The two macOS 15 Intel jobs (Python 3.10 and 3.13), two Windows jobs and two Ubuntu jobs all succeeded. Aggregated artifact [`real-cross-os-metrics`](https://github.com/jinxinche/RAEE/actions/runs/40972501262/artifacts/12941700067) reports `n_runners=6`, `n_cases=48`, `TP=30`, `FP=6`, `TN=6`, `FN=6`, precision/recall `0.8333`, FPR `0.50`, FNR `0.1667`.
+
+**Root cause confirmed from actual failed macOS logs:** `safe_io._reject_links()` refused an OS-managed symlink in the **temporary directory parent chain** (e.g. macOS `/var` → `/private/var`) at `core.init(root)`. It was not a `setup-python` error. The benchmark was corrected to canonicalize its **owned, freshly created** temporary root using `Path(tmp).resolve(strict=True)`. `safe_io.py` was **not** weakened. A dedicated symlink-parent regression test was added. The separate Windows CRLF-vs-LF fixture inconsistency was prevented via byte-identical `write_bytes`.
+
+**Scope:** The completed six-runner evidence tests **macOS 15 Intel, not macOS 26 ARM64**. Earlier failures on ARM64 had the same error but a post-fix ARM64 pass has not yet been observed. The metric definitions are prespecified synthetic relevance/transfer judgments; neither full semantic test adequacy nor independent signed provenance is established.
 
 ## Expected 48 evaluation opportunities
 
