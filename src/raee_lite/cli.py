@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .core import add_boundary, add_requirement, init, run_check
 from .contracts import KINDS, set_expectation, plan_text
+from .obligation_trace import trace as obligation_trace, format_text as format_obligation_trace
 from .discovery import discover
 from .enhanced import audit, ensure_initialized, github_step_summary, is_passing, save_report
 from .enhanced import run_discovered
@@ -65,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     skill = sub.add_parser("install-skill", help="Install a non-overwriting Agent Skill for a coding agent")
     skill.add_argument("--agent", choices=["codex", "claude", "cursor", "all"], required=True)
     sub.add_parser("plan", help="Show explicit gaps and suggested additional check scopes (read only)")
+    trace_parser = sub.add_parser("trace", help="Explain the declared evidence graph and exact unproven obligations (read only)")
+    trace_parser.add_argument("--for", dest="requirement", help="Trace one declared requirement ID; default: all")
+    trace_parser.add_argument("--json", action="store_true", help="Machine-readable evidence graph; never a coverage proof")
     sub.add_parser("report", help="Generate JSON, Markdown, HTML and SARIF reports")
     sub.add_parser("status", help="Inspect current evidence and freshness")
     imp = sub.add_parser("import-agent", help="Explicitly import a local Codex/Claude JSONL transcript; logs do not pass contracts")
@@ -212,6 +216,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "plan":
             report = audit(root)
             print(plan_text(report))
+            return 0
+        if args.action == "trace":
+            result = obligation_trace(audit(root), requirement_id=args.requirement)
+            print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else format_obligation_trace(result))
             return 0
         if args.action == "preflight":
             result = preflight.evaluate(root)
