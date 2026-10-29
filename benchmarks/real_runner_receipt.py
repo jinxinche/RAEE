@@ -19,7 +19,12 @@ from raee_lite.evidence_binding import current_environment
 
 def create_receipt() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
+        # macOS's tempfile may return /var/folders/... where /var is a
+        # system-managed symlink to /private/var. Resolve ONLY our own
+        # unpredictable, already-created temporary directory before using
+        # RAEE's intentionally strict no-symlink evidence writer.
+        # Do not resolve user-selected repository paths or weaken safe_io.
+        root = Path(tmp).resolve(strict=True)
         # Byte-exact LF fixtures are required: Python text-mode writes may
         # translate \n to CRLF on Windows, invalidating cross-OS SHA comparison.
         (root / "app.py").write_bytes(b"def valid(x): return bool(x)\n")
