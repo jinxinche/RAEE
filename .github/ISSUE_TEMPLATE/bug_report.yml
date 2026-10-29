@@ -1,0 +1,52 @@
+name: "Bug report — reproducible evidence"
+description: "Report an RAEE-Lite failure, false positive, or false negative. Do not include secrets or raw private agent chats."
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide a minimal, sanitized reproduction. Never paste tokens, private prompts, proprietary source, or unredacted command outputs. A report is not a security disclosure channel; use SECURITY.md for sensitive issues.
+  - type: input
+    id: version
+    attributes:
+      label: Tested RAEE-Lite version / commit
+      placeholder: "v0.10.0rc2 / full commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected area
+      options:
+        - "Evidence contracts and reports"
+        - "Check discovery or execution"
+        - "Codex / Claude Code import"
+        - "PR boundary inventory"
+        - "CI provenance / attestation"
+        - "CLI or installation"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Minimal reproduction
+      description: "Small synthetic files and exact safe commands; do not attach real private logs"
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected versus observed behavior
+      placeholder: "Expected: ...\nObserved: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details (sanitized)
+      description: "OS, Python version, relevant command flags; no user path or secret"
+    validations:
+      required: false
