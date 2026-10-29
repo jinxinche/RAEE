@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -92,6 +93,27 @@ class RealMatrixContract(unittest.TestCase):
         source = (ROOT / "benchmarks" / "real_runner_receipt.py").read_text(encoding="utf-8")
         self.assertIn('write_bytes(b"def valid(x): return bool(x)\\n")', source)
         self.assertIn('write_bytes(b"assert 1 == 1\\n")', source)
+
+    @unittest.skipIf(os.name == "nt", "Windows creation of symlinks requires elevated privileges")
+    def test_macos_style_temp_symlink_is_canonicalized_only_for_owned_fixture(self):
+        # On macOS /var points to /private/var. Reproduce that topology
+        # without altering filesystem security policy or relying on macOS.
+        from raee_lite.core import init
+        with tempfile.TemporaryDirectory() as outer:
+            physical = Path(outer) / "private" / "var"
+            physical.mkdir(parents=True)
+            alias = Path(outer) / "var"
+            alias.symlink_to(physical, target_is_directory=True)
+            with tempfile.TemporaryDirectory(dir=alias) as tmp:
+                unresolved = Path(tmp)
+                with self.assertRaisesRegex(ValueError, "Refusing symlink path"):
+                    init(unresolved)
+                canonical = unresolved.resolve(strict=True)
+                init(canonical)
+                self.assertTrue((canonical / ".raee" / "manifest.json").is_file())
+                self.assertFalse(canonical.is_symlink())
+        source = (ROOT / "benchmarks" / "real_runner_receipt.py").read_text(encoding="utf-8")
+        self.assertIn("root = Path(tmp).resolve(strict=True)", source)
 
     def test_workflow_mac_uses_stable_explicit_intel_image(self):
         workflow = (ROOT / ".github/workflows/experimental-real-os-matrix.yml").read_text(encoding="utf-8")
