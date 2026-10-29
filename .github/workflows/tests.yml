@@ -27,6 +27,9 @@ jobs:
         run: python -m pip install -e ".[attest]"
       - name: Run regression suite
         run: python scripts/run_reviewed_suite.py --min-tests 150
+      - name: Exercise untrusted-PR risk cases (Ubuntu, offline)
+        if: matrix.os == 'ubuntu-latest'
+        run: python scripts/local_pr_attack_smoke.py
       - name: Validate synthetic fixtures
         run: raee-lite validate-corpus --index validation_corpus/index.json --out validation_corpus/summary.json
       - name: Nonexecuting inventory
