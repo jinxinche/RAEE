@@ -14,7 +14,8 @@ jobs:
       - name: Checkout trusted base
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          # Fetch the current trusted main; an old PR event may carry a stale base.sha.
+          ref: refs/heads/main
           path: base
           persist-credentials: false
       - name: Checkout PR head as untrusted data
