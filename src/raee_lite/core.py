@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from .safe_io import safe_read_json, write_json as atomic_json
+from .evidence_binding import intent_digest
 from .safe_process import run as bounded_run
 from datetime import datetime, timezone
 from pathlib import Path
@@ -227,7 +228,7 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
     after = fingerprint(root)
     entry = {
         "id": f"E{len(ledger['runs']) + 1}", "role": "verification",
-        "requirement": requirement, "command": ["[explicit command redacted]"],
+        "requirement": requirement, "requirement_digest": intent_digest(next(r["description"] for r in m["requirements"] if r["id"] == requirement)), "command": ["[explicit command redacted]"],
         "command_sha256": hashlib.sha256(json.dumps(command).encode('utf-8')).hexdigest(),
         "declared_kind": kind,
         "observed_exit_code": code,
