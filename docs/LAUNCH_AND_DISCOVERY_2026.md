@@ -21,6 +21,8 @@ Offline evidence firewall for AI-assisted coding. Track what was checked, what c
 
 Set these under the repository's **About** gear. Repository metadata cannot be changed just by adding this file.
 
+Once you've reviewed and installed the source candidate locally, use `bash scripts/configure_discovery.sh --check` to inspect GitHub's actual About/Topics. After explicit owner consent, `bash scripts/configure_discovery.sh --apply` updates the metadata and reads it back. **The existence of the script does not mean the About/Topics are already configured.**
+
 **Repository naming:** The public URL is currently `jinxinche/RAEE`, while the application is called **RAEE-Lite**. Consider renaming the repository to `raee-lite` **after** updating code, CI identity checks, citations, links and provenance rules. Do not rename silently during a release candidate: current attestation verification pins `jinxinche/RAEE`.
 
 **Social preview asset:** Once a tested preview asset exists, use GitHub Settings → Social preview; prefer 1280 × 640 px, under 1 MB. Do not insert fabricated usage screenshots or synthetic “verified” badges.
