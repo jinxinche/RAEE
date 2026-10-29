@@ -4,6 +4,9 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
+**快速体验（候选分支）：** 在可信的隔离环境中安装 [v0.10.0rc2 源码候选](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2)，然后运行 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；没有自动执行项目测试。正式稳定版尚未发布。
+
+
 ## 为什么需要 RAEE-Lite？
 
 Codex、Claude Code、Cursor 等 AI 编程工具可以快速修改代码，但“AI 声称已修复”“测试进程退出码为 0”“功能真实满足用户要求”是三件不同的事。
