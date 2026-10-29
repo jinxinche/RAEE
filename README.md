@@ -35,7 +35,7 @@ raee-lite check
 
 **What makes it useful:** Coding agents' statements, changed files, executed checks and unresolved requirements are *different evidence types*. RAEE-Lite keeps them separate rather than treating a green test as proof that a requested feature works.
 
-[Reproduction details](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/examples/DEMO.md) · [Security boundaries](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/SECURITY.md) · [Report a reproducible issue](https://github.com/jinxinche/RAEE/issues/new) · [Local validation and pending release gates](https://github.com/jinxinche/RAEE/pull/2)
+[Reproduction details](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/examples/DEMO.md) · [Security boundaries](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/SECURITY.md) · [Early-access feedback](https://github.com/jinxinche/RAEE/issues/7) · [Local validation and pending release gates](https://github.com/jinxinche/RAEE/pull/2)
 
 
 
@@ -104,6 +104,12 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 The near-term priorities are a reviewed public source release, real GitHub Actions results on Linux/Windows/macOS, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
 **Current status: public release candidate available for early feedback; independent security review and cross-platform signed CI acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
+
+## Community discussion
+
+Have a reproducible example of an AI agent claiming "done" without matching evidence? Join the [early-access feedback thread](https://github.com/jinxinche/RAEE/issues/7). Please share only minimal, sanitized examples.
+
+For developers who wish to write about this project, see the [technical explainer](docs/green-tests-not-verified-requirements.md) and [multilingual community outreach guide](docs/COMMUNITY_OUTREACH_EARLY_ACCESS.md). The latter contains drafts, **not published posts or verified reach metrics**.
 
 ## Contributing and license
 
