@@ -1,0 +1,2 @@
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "id": "tool_a", "input": {"command": "pytest tests/test_login.py --token=PRIVATE_DO_NOT_SAVE"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tool_a", "content": "Exit code: 0\nPRIVATE_DO_NOT_SAVE stdout"}]}}

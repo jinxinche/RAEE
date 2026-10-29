@@ -1,0 +1,2 @@
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "id": "t2", "input": {"command": "npx playwright test"}}]}}
+{"type": "user", "toolUseResult": {"exitCode": 2}, "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content": "test failure"}]}}

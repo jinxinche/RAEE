@@ -1,0 +1,5 @@
+# Maintainer responsible for reviewing trust boundaries. Independent approvals
+# still require a DIFFERENT collaborator with appropriate repository permissions.
+/.github/workflows/ @jinxinche
+/scripts/ @jinxinche
+/src/raee_lite/ci_attestation.py @jinxinche
