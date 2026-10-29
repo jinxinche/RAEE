@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import core
 from .evidence_binding import evaluate_binding
+from .dependency_scope import snapshot as scoped_snapshot, compare as compare_scoped
 
 KINDS = ("unit", "integration", "e2e", "typecheck", "lint", "build", "smoke", "security")
 
@@ -45,7 +46,8 @@ def suggestions(description: str) -> list[dict]:
     return [{"kind": kind, "reason": reason} for kind, pattern, reason in HINTS if pattern.search(description)]
 
 
-def assess_contracts(root: Path, source: dict, *, target_environment: dict | None = None) -> list[dict]:
+def assess_contracts(root: Path, source: dict, *, target_environment: dict | None = None,
+                     dependency_context: dict | None = None) -> list[dict]:
     manifest = core.get_manifest(root)
     ledger = core.read_json(root / core.LEDGER, {"schema": 1, "runs": []})
     runs = ledger.get("runs", [])
@@ -62,6 +64,35 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
             if not last:
                 status = "MISSING"
                 gaps.append({"kind": kind, "reason": "No explicitly labelled check was executed for this role."})
+            elif last.get("dependency_scope") is not None:
+                # Explicit scoped receipts do NOT fall back silently to the
+                # global fingerprint or assume the previously declared external
+                # revision still applies in a new review environment.
+                context = (dependency_context or {}).get(rid)
+                if not isinstance(context, dict):
+                    status = "SCOPE_CONTEXT_REQUIRED"
+                else:
+                    binding = last["dependency_scope"]
+                    if not isinstance(binding.get("after"), dict) or (
+                        binding["before"].get("binding_sha256") != binding["after"].get("binding_sha256")
+                    ):
+                        status = "STALE"
+                    else:
+                        try:
+                            current = scoped_snapshot(root, context["paths"], context.get("external_revisions"))
+                            status = compare_scoped(binding["before"], current,
+                                                    check_external=context.get("check_external", True))
+                        except (ValueError, KeyError, TypeError):
+                            status = "SCOPE_INPUT_UNAVAILABLE"
+                    if status == "DECLARED_INPUTS_MATCHED":
+                        status = evaluate_binding(last, req["description"],
+                                                  target_environment=target_environment)
+                        if status == "BINDING_MATCHED":
+                            status = ("FAILED" if last.get("observed_exit_code") != 0
+                                      else "OBSERVED_PASS")
+                if status != "OBSERVED_PASS":
+                    gaps.append({"kind": kind, "reason":
+                                 "Declared dependency inputs, intent, execution, or destination environment are not currently verified."})
             elif last.get("source_fingerprint") != source["sha256"] or last.get("source_fingerprint_after") != last.get("source_fingerprint"):
                 status = "STALE"
                 gaps.append({"kind": kind, "reason": "The last check does not match the current source snapshot."})
