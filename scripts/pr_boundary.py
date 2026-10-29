@@ -26,6 +26,18 @@ BLOCKED_EXACT = {
 }
 
 
+def symlink_signature(path: Path) -> str:
+    """Record the link target text without resolving/following the target.
+
+    A constant 'symlink' marker wrongly treats a retargeted symlink as unchanged.
+    Hash the target to avoid leaking paths in public CI output.
+    """
+    target = os.fsencode(os.readlink(path))
+    if len(target) > 4096:
+        raise ValueError('Symlink target exceeds bounded inspection limit')
+    return 'symlink:' + hashlib.sha256(target).hexdigest()
+
+
 def snapshot(root: Path) -> dict[str, str]:
     root = root.resolve(strict=True)
     found: dict[str, str] = {}
@@ -39,7 +51,9 @@ def snapshot(root: Path) -> dict[str, str]:
                 continue
             candidate = Path(current) / d
             if candidate.is_symlink():
-                found[candidate.relative_to(root).as_posix()] = 'symlink'
+                if len(found) >= MAX_FILES:
+                    raise ValueError('PR inspection file-count limit exceeded')
+                found[candidate.relative_to(root).as_posix()] = symlink_signature(candidate)
             else:
                 safe_dirs.append(d)
         dirs[:] = safe_dirs
@@ -48,7 +62,9 @@ def snapshot(root: Path) -> dict[str, str]:
             relative = p.relative_to(root).as_posix()
             meta = p.lstat()
             if stat.S_ISLNK(meta.st_mode):
-                found[relative] = 'symlink'
+                if len(found) >= MAX_FILES:
+                    raise ValueError('PR inspection file-count limit exceeded')
+                found[relative] = symlink_signature(p)
                 continue
             if not stat.S_ISREG(meta.st_mode):
                 raise ValueError(f'Unsafe special file: {relative}')
@@ -73,7 +89,7 @@ def evaluate(base: Path, head: Path) -> tuple[bool, list[str]]:
     changed = sorted(path for path in old.keys() | new.keys() if old.get(path) != new.get(path))
     risky = [path for path in changed if path in BLOCKED_EXACT or
              any(path.startswith(prefix) for prefix in BLOCKED_PREFIXES) or
-             new.get(path) == 'symlink']
+             new.get(path, '').startswith('symlink:')]
     return not risky, risky
 
 
