@@ -24,7 +24,21 @@ The external revision is an explicitly supplied **synthetic metadata label**, no
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Original global digest (Run #8) | 30 | 6 | 6 | 6 | 0.50 | 0.1667 |
 
-**The expected direction** is a reduction in FP in arm 2 and FN in arm 3. Any numerical result for the new arms must come from successful [experimental scoped-ablation CI](../.github/workflows/experimental-dependency-ablation.yml) logs and its uploaded artifact, **not from this hypothesis**.
+### Measured paired ablation from real GitHub runner jobs
+
+[Experimental ablation run #2](https://github.com/jinxinche/RAEE/actions/runs/40974202120) at exact commit `612e5b39e2519ff454f2f99ee376e7d7099fab17` completed **six real OS/Python receipt jobs and the aggregate successfully**. The resulting [`scoped-dependency-ablation-metrics` Artifact](https://github.com/jinxinche/RAEE/actions/runs/40974202120/artifacts/12941812282) was downloaded and parsed separately. The ZIP SHA-256 **`ecb64ebe0b6078f8b31f56ab1f1acf78fd3ff802aba0dd01e8590049319dd68c`** matches GitHub's reported digest.
+
+| Policy | TP | FP | TN | FN | FPR | FNR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Global baseline | 30 | 6 | 6 | 6 | 0.5000 | 0.1667 |
+| Declared source scope | 30 | 0 | 12 | 6 | 0.0000 | 0.1667 |
+| Declared scope + external revision | 36 | 0 | 12 | 0 | 0.0000 | 0.0000 |
+
+For **each** policy, the additional **6/6 relevant-source mutation controls** correctly withdrew evidence. The cloud aggregate also ran 15/15 new scoped-dependency tests and 7/7 real-runner protocol tests.
+
+This is a **controlled proof-of-mechanism observation**, not a population-level false-positive/false-negative estimate. Every tested external revision change was explicitly declared and the truth labels were pre-specified by the same author; neither input completeness nor genuine test behavior was independently adjudicated. In particular, the zero counts for the third arm **cannot** be extrapolated to undeclared/unknown dependencies.
+
+The workflow remains experimental and low-privilege; the Artifact digest is not an independent attestation.
 
 ## Scope contract
 
