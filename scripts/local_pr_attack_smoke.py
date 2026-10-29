@@ -27,6 +27,12 @@ def scenario(mode: str) -> dict:
             (head / 'untrusted-link').symlink_to('/etc/passwd')
         elif mode == 'dir-symlink':
             (head / 'untrusted-dir').symlink_to('/tmp', target_is_directory=True)
+        elif mode == 'retarget-file-symlink':
+            (base / 'existing-link').symlink_to('/tmp/ordinary')
+            (head / 'existing-link').symlink_to('/etc/passwd')
+        elif mode == 'retarget-dir-symlink':
+            (base / 'existing-dir').symlink_to('/tmp/ordinary', target_is_directory=True)
+            (head / 'existing-dir').symlink_to('/tmp/changed', target_is_directory=True)
         elif mode == 'untrusted-code':
             # A very visible would-be side effect; scanner must not import/execute this.
             (head/'injected.py').write_text('raise RuntimeError("ATTACK CODE EXECUTED")\n')
@@ -34,14 +40,14 @@ def scenario(mode: str) -> dict:
             raise ValueError('Unsupported scenario')
         run = subprocess.run([sys.executable, str(CHECKER), '--base', str(base), '--head', str(head)],
                              capture_output=True, text=True, timeout=15)
-        expect = 1 if mode in {'security-workflow','file-symlink','dir-symlink'} else 0
+        expect = 1 if mode in {'security-workflow','file-symlink','dir-symlink','retarget-file-symlink','retarget-dir-symlink'} else 0
         # Only safe status, not untrusted text, is emitted as JSON.
         return {'case':mode,'expected_exit':expect,'observed_exit':run.returncode,
                 'passed':run.returncode==expect}
 
 
 if __name__ == '__main__':
-    results = [scenario(x) for x in ('ordinary','security-workflow','file-symlink','dir-symlink','untrusted-code')]
+    results = [scenario(x) for x in ('ordinary','security-workflow','file-symlink','dir-symlink','retarget-file-symlink','retarget-dir-symlink','untrusted-code')]
     print(json.dumps({'scenario':'local-only-untrusted-pr-boundary','results':results,
                       'passed':sum(x['passed'] for x in results),'total':len(results),
                       'note':'Local subprocess verification only; no actual GitHub fork PR was executed.'}, indent=2))
