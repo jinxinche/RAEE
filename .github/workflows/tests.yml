@@ -11,11 +11,6 @@ jobs:
     name: trusted-${{ matrix.os }}-py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
-    env:
-      PYTHONIOENCODING: utf-8
-      TMPDIR: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
-      TEMP: ${{ runner.temp }}
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +27,11 @@ jobs:
       - name: Install on trusted branch only
         run: python -m pip install -e ".[attest]"
       - name: Run regression suite
+        env:
+          PYTHONIOENCODING: utf-8
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: python scripts/run_reviewed_suite.py --min-tests 240 --require-critical-modules
       - name: Exercise untrusted-PR risk cases (Ubuntu, offline)
         if: matrix.os == 'ubuntu-latest'

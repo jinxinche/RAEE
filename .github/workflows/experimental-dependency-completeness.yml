@@ -8,11 +8,6 @@ permissions:
 jobs:
   audit:
     timeout-minutes: 40
-    env:
-      PYTHONIOENCODING: utf-8
-      TMPDIR: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
-      TEMP: ${{ runner.temp }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,4 +42,8 @@ jobs:
       - name: Full unmodified regression suite
         env:
           PYTHONPATH: src
+          PYTHONIOENCODING: utf-8
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: python scripts/run_reviewed_suite.py --min-tests 240 --require-critical-modules
