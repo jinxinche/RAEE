@@ -125,6 +125,8 @@ The near-term priorities are a reviewed public source release, real GitHub Actio
 
 **Current status: public source under PR review; real cross-platform trusted CI and independent provenance acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
 
+The dependency-completeness experiment now gates the minimum supported Python 3.10 and current stable Python 3.15 on Linux, Windows and macOS Intel. This experimental matrix is separate from protected-main acceptance and does not establish independent provenance or production readiness.
+
 ## Contributing and license
 
 Issues, reproduction cases, accessibility improvements and translations will be welcome after the source release. Please never submit credentials, private agent conversations, or proprietary code in a public issue.

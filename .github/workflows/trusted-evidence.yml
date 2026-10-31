@@ -30,7 +30,7 @@ jobs:
           raee-lite init
           raee-lite add "Trusted regression suite executes successfully"
           raee-lite expect --for R1 --kind unit
-          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 150
+          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 240 --require-critical-modules
           raee-lite report
       - name: Export bounded claim (not yet authenticated)
         env:

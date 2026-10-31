@@ -31,7 +31,7 @@ jobs:
           raee-lite init
           raee-lite add "Regression suite executes successfully"
           raee-lite expect --for R1 --kind unit
-          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 150
+          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 240 --require-critical-modules
           raee-lite report
         env:
           CI: 'true'

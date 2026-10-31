@@ -15,17 +15,45 @@ MAX_VISITED = 128
 _DYNAMIC = {"__import__", "import_module", "exec", "eval"}
 
 
+def _search_roots(root: Path) -> tuple[Path, ...]:
+    """Return bounded Python source roots without following a linked src tree."""
+    roots = [root]
+    src = root / "src"
+    if src.is_dir() and not src.is_symlink():
+        roots.append(src)
+    return tuple(roots)
+
+
+def _unsafe_path(root: Path, path: Path) -> bool:
+    return path.is_symlink() or any(
+        parent.is_symlink()
+        for parent in path.parents
+        if parent != root and root in parent.parents
+    )
+
+
 def _module_path(root: Path, name: str) -> str | None:
     if not name or any(not x.isidentifier() for x in name.split(".")):
         return None
     stem = "/".join(name.split("."))
-    for rel in (stem + ".py", stem + "/__init__.py"):
-        p = root / rel
-        if p.is_symlink() or any(parent.is_symlink() for parent in p.parents if parent != root and root in parent.parents):
-            continue
-        if p.is_file():
-            return rel
+    for search_root in _search_roots(root):
+        for rel in (stem + ".py", stem + "/__init__.py"):
+            p = search_root / rel
+            if _unsafe_path(root, p):
+                continue
+            if p.is_file():
+                return p.relative_to(root).as_posix()
     return None
+
+
+def _looks_project_local(root: Path, name: str) -> bool:
+    if not name:
+        return False
+    top = name.split(".", 1)[0]
+    if top in {"src", "tests"}:
+        return True
+    return any((base / top).is_dir() or (base / f"{top}.py").is_file()
+               for base in _search_roots(root))
 
 
 def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
@@ -64,9 +92,15 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
         else:
             package = package.rpartition(".")[0]
         for node in ast.walk(tree):
-            modules: list[str] = []
             if isinstance(node, ast.Import):
-                modules.extend(a.name for a in node.names)
+                for alias in node.names:
+                    target = _module_path(root, alias.name)
+                    if target:
+                        discovered.add(target)
+                        if target not in visited:
+                            queue.append(target)
+                    elif _looks_project_local(root, alias.name):
+                        unresolved.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
                     parts = package.split(".") if package else []
@@ -78,8 +112,21 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                     base = ".".join(filter(None, [prefix, node.module or ""]))
                 else:
                     base = node.module or ""
-                modules.append(base)
-                modules.extend(".".join(filter(None, (base, a.name))) for a in node.names if a.name != "*")
+                candidates = [base]
+                candidates.extend(".".join(filter(None, (base, a.name)))
+                                  for a in node.names if a.name != "*")
+                resolved = False
+                for module in candidates:
+                    target = _module_path(root, module)
+                    if target:
+                        resolved = True
+                        discovered.add(target)
+                        if target not in visited:
+                            queue.append(target)
+                # A resolved base may export an attribute with the imported
+                # name, so an unresolved base.name is not itself an omission.
+                if not resolved and (node.level or _looks_project_local(root, base)):
+                    unresolved.add(base or f"relative-from:{rel}")
                 if any(a.name == "*" for a in node.names):
                     warnings.add("STAR_IMPORT:" + rel)
             elif isinstance(node, ast.Call):
@@ -87,14 +134,6 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                 called = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
                 if called in _DYNAMIC:
                     warnings.add("DYNAMIC_EXECUTION_OR_IMPORT:" + rel)
-            for module in modules:
-                target = _module_path(root, module)
-                if target:
-                    discovered.add(target)
-                    if target not in visited:
-                        queue.append(target)
-                elif module and (module.startswith("src.") or module.startswith("tests.")):
-                    unresolved.add(module)
     missing = sorted(discovered - declared)
     return {
         "schema": "raee.dependency_completeness_audit.v1",

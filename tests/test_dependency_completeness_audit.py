@@ -69,6 +69,27 @@ class CompletenessAuditTests(unittest.TestCase):
         result = self.audit(["pkg/app.py"])
         self.assertIn("pkg/helper.py", result["missing_local_dependencies"])
 
+    def test_src_layout_absolute_import(self):
+        self.write("src/pkg/__init__.py", "")
+        self.write("src/pkg/app.py", "from pkg import helper\n")
+        self.write("src/pkg/helper.py", "VALUE = 1\n")
+        result = self.audit(["src/pkg/app.py"])
+        self.assertIn("src/pkg/helper.py", result["missing_local_dependencies"])
+        self.assertEqual(result["unresolved_project_imports"], [])
+
+    def test_from_import_attribute_is_not_false_unresolved(self):
+        self.write("src/pkg/__init__.py", "")
+        self.write("src/pkg/app.py", "from pkg.helper import VALUE\n")
+        self.write("src/pkg/helper.py", "VALUE = 1\n")
+        result = self.audit(["src/pkg/app.py", "src/pkg/helper.py"])
+        self.assertEqual(result["unresolved_project_imports"], [])
+
+    def test_missing_project_module_is_unresolved(self):
+        self.write("src/pkg/__init__.py", "")
+        self.write("src/pkg/app.py", "import pkg.missing\n")
+        result = self.audit(["src/pkg/app.py"])
+        self.assertEqual(result["unresolved_project_imports"], ["pkg.missing"])
+
 
 if __name__ == "__main__":
     unittest.main()

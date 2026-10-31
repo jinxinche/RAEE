@@ -20,7 +20,7 @@ This is a **local engineering gate**, not an exhaustive security proof or a prom
 
 - Source tree is distributable as a Python package; test via a new virtual environment.
 - Read-only `preflight` provides local heuristic CI configuration findings; it does not run scripts.
-- Trusted-main test workflow refuses unexpectedly small test discovery (`--min-tests 150`).
+- Trusted-main test workflow refuses fewer than 240 discovered tests and passes `--require-critical-modules` to require the counterevidence, dependency, cross-OS, security and workflow-policy modules.
 - High-impact PR file guard also routes `.gitmodules`, `.gitattributes`, and `pyproject.toml` changes to review.
 - `preflight` and the minimum-test runner have dedicated negative tests.
 - No claims of live branch protection or GitHub OIDC trust arise from local mocks.
