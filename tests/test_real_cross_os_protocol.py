@@ -1,0 +1,210 @@
+"""Offline contract checks for the real runner matrix (not cloud execution)."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from raee_lite.evidence_binding import intent_digest
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "real_matrix_aggregator", ROOT / "benchmarks" / "aggregate_real_matrix.py")
+AGGREGATOR = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(AGGREGATOR)
+
+
+def fake_receipt(os_name, py_version, *, fingerprint="same-fixture-sha"):
+    environment = {"os": "os-identity-" + os_name,
+                   "python": py_version}
+    return {
+        "schema": "raee.real_runner_receipt.v1",
+        "platform": os_name,
+        "python": py_version,
+        "environment": environment,
+        "receipt_environment": environment.copy(),
+        "receipt_id": "E1",
+        "receipt_source_fingerprint": fingerprint,
+        "intent_digest_present": True,
+        "requirement_digest": intent_digest("Signup rejects invalid addresses"),
+        "observed_exit_code": 0,
+        "same_runner_state": "OBSERVED_PASS",
+        "ablation": {
+            "initial_scoped_state": "OBSERVED_PASS",
+            "irrelevant_note_change": {
+                "ground_truth_revoke": False,
+                "global": "STALE",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "OBSERVED_PASS",
+            },
+            "external_revision_change": {
+                "ground_truth_revoke": True,
+                "global": "OBSERVED_PASS",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "EXTERNAL_STATE_CHANGED",
+            },
+            "relevant_source_change": {
+                "ground_truth_revoke": True,
+                "global": "STALE",
+                "scoped_files": "DEPENDENCY_SOURCE_CHANGED",
+                "scoped_plus_external": "DEPENDENCY_SOURCE_CHANGED",
+            },
+        },
+        "hard_negative_harmless_tracked_change": {
+            "ground_truth_revoke": False,
+            "observed_state": "STALE",
+            "predicted_revoke": True,
+        },
+        "hard_positive_untracked_external_revision": {
+            "ground_truth_revoke": True,
+            "observed_state": "OBSERVED_PASS",
+            "predicted_revoke": False,
+        }
+    }
+
+
+class RealMatrixContract(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+
+    def populate(self, *, missing=None, duplicate=False, bad_sha=False):
+        identities = [(os_name, py) for os_name in ("linux", "win32", "darwin")
+                      for py in ("3.10.16", "3.13.4")]
+        for index, (os_name, py) in enumerate(identities):
+            if index == missing:
+                continue
+            if duplicate and index == 5:
+                os_name, py = identities[0]
+            row = fake_receipt(os_name, py,
+                               fingerprint="different" if bad_sha and index == 5 else "same-fixture-sha")
+            folder = self.root / str(index)
+            folder.mkdir()
+            (folder / "receipt.json").write_text(json.dumps(row), encoding="utf-8")
+
+    def test_six_unique_receipts_yield_48_expected_controls(self):
+        self.populate()
+        m = AGGREGATOR.summarize(self.root)
+        self.assertEqual(m["n_runners"], 6)
+        self.assertEqual(m["n_cases"], 48)
+        self.assertEqual((m["TP"], m["FP"], m["TN"], m["FN"]), (30, 6, 6, 6))
+        self.assertGreater(m["false_positive_rate"], 0)
+        self.assertGreater(m["false_negative_rate"], 0)
+        # Synthetic aggregator unit fixture: not a cloud observation.
+        self.assertEqual(
+            [(m["ablation"][name]["TP"], m["ablation"][name]["FP"],
+              m["ablation"][name]["TN"], m["ablation"][name]["FN"])
+             for name in ("global", "scoped_files", "scoped_plus_external")],
+            [(30, 6, 6, 6), (30, 0, 12, 6), (36, 0, 12, 0)])
+        for item in m["ablation"].values():
+            self.assertEqual(item["relevant_source_revoked"], 6)
+
+    def test_missing_runner_is_not_silently_accepted(self):
+        self.populate(missing=2)
+        with self.assertRaisesRegex(ValueError, "exactly six"):
+            AGGREGATOR.summarize(self.root)
+
+    def test_duplicate_runner_identity_is_rejected(self):
+        self.populate(duplicate=True)
+        with self.assertRaisesRegex(ValueError, "Duplicate OS/Python"):
+            AGGREGATOR.summarize(self.root)
+
+    def test_nonidentical_source_snapshots_rejected(self):
+        self.populate(bad_sha=True)
+        with self.assertRaisesRegex(ValueError, "Different source snapshots"):
+            AGGREGATOR.summarize(self.root)
+
+    def test_six_distinct_identities_from_wrong_matrix_are_rejected(self):
+        self.populate()
+        for folder in ("4", "5"):
+            path = self.root / folder / "receipt.json"
+            row = json.loads(path.read_text(encoding="utf-8"))
+            row["platform"] = "freebsd"
+            path.write_text(json.dumps(row), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "expected 3 OS"):
+            AGGREGATOR.summarize(self.root)
+
+    def test_malformed_or_inconsistent_receipts_are_rejected(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("schema", "unknown"), ("observed_exit_code", False),
+                           ("intent_digest_present", "true"), ("requirement_digest", "different"),
+                           ("receipt_source_fingerprint", None), ("python", "3.15.2"),
+                           ("receipt_environment", {"os": "other", "python": "3.10.16"})):
+            with self.subTest(key=key):
+                row = json.loads(original)
+                row[key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
+
+    def test_control_labels_and_predictions_cannot_be_relabelled(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("ground_truth_revoke", "false"), ("ground_truth_revoke", True),
+                           ("predicted_revoke", False), ("observed_state", "invented")):
+            with self.subTest(key=key, value=value):
+                row = json.loads(original)
+                row["hard_negative_harmless_tracked_change"][key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
+
+    def test_ablation_rejects_invented_status_and_relabelled_ground_truth(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("global", "invented"), ("ground_truth_revoke", False)):
+            with self.subTest(key=key):
+                row = json.loads(original)
+                row["ablation"]["relevant_source_change"][key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
+
+    def test_runner_fixture_lf_bytes_are_explicit(self):
+        source = (ROOT / "benchmarks" / "real_runner_receipt.py").read_text(encoding="utf-8")
+        self.assertIn('write_bytes(b"def valid(x): return bool(x)\\n")', source)
+        self.assertIn('write_bytes(b"assert 1 == 1\\n")', source)
+
+    @unittest.skipIf(os.name == "nt", "Windows creation of symlinks requires elevated privileges")
+    def test_macos_style_temp_symlink_is_canonicalized_only_for_owned_fixture(self):
+        # On macOS /var points to /private/var. Reproduce that topology
+        # without altering filesystem security policy or relying on macOS.
+        from raee_lite.core import init
+        with tempfile.TemporaryDirectory() as outer:
+            physical = Path(outer) / "private" / "var"
+            physical.mkdir(parents=True)
+            alias = Path(outer) / "var"
+            alias.symlink_to(physical, target_is_directory=True)
+            with tempfile.TemporaryDirectory(dir=alias) as tmp:
+                unresolved = Path(tmp)
+                with self.assertRaisesRegex(ValueError, "Refusing symlink path"):
+                    init(unresolved)
+                canonical = unresolved.resolve(strict=True)
+                init(canonical)
+                self.assertTrue((canonical / ".raee" / "manifest.json").is_file())
+                self.assertFalse(canonical.is_symlink())
+        source = (ROOT / "benchmarks" / "real_runner_receipt.py").read_text(encoding="utf-8")
+        self.assertIn("root = Path(tmp).resolve(strict=True)", source)
+
+    def test_workflow_mac_uses_stable_explicit_intel_image(self):
+        workflow = (ROOT / ".github/workflows/experimental-real-os-matrix.yml").read_text(encoding="utf-8")
+        self.assertIn("macos-15-intel", workflow)
+        self.assertIn("architecture: x64", workflow)
+        self.assertIn("fail-fast: false", workflow)
+        self.assertNotIn("pull_request_target:", workflow)
+        self.assertNotIn("id-token: write", workflow)
+        self.assertNotIn("attestations: write", workflow)
+        self.assertIn("Verify actual interpreter and architecture", workflow)
+        self.assertIn("if: failure()", workflow)
+
+
+if __name__ == "__main__":
+    unittest.main()

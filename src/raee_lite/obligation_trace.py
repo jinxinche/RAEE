@@ -13,6 +13,18 @@ _REMEDY = {
     "STALE": "Re-run the declared check against the current source snapshot and inspect its assertions.",
     "FAILED": "Investigate the nonzero check result; do not reuse an earlier passing receipt.",
     "PARTIAL": "Review unhashed inputs and fingerprint limits before relying on this receipt.",
+    "SCOPE_CONTEXT_REQUIRED": "Provide the current declared dependency paths and nonsecret external revisions; cannot implicitly reuse old labels.",
+    "SCOPE_UNBOUND": "Old receipt lacks a scoped binding; rerun a scoped, explicitly labelled check.",
+    "SCOPE_INCOMPLETE": "Include the omitted local dependencies and rerun the check with the reviewed scope.",
+    "SCOPE_AUDIT_UNCERTAIN": "Resolve dynamic imports, unreadable inputs or audit limits before reusing this receipt.",
+    "SCOPE_DECLARATION_CHANGED": "Declared dependency set changed; review scope and rerun against the new set.",
+    "DEPENDENCY_SOURCE_CHANGED": "A declared requirement-relevant file changed; rerun the check.",
+    "EXTERNAL_STATE_CHANGED": "A declared external version changed; rerun the check in the new context.",
+    "SCOPE_INPUT_UNAVAILABLE": "A declared input is missing, unsafe, or cannot be fingerprinted; review before rerunning.",
+    "INTENT_UNBOUND": "Re-run check with explicit intent binding; legacy evidence cannot prove unchanged requirement text.",
+    "INTENT_CHANGED": "Requirement text changed; re-declare target and rerun check.",
+    "ENVIRONMENT_UNBOUND": "Execution environment metadata missing; rerun in a known target environment.",
+    "ENVIRONMENT_SHIFT_UNVERIFIED": "Receipt is from another Python/OS environment; validate on target runner.",
     "OBSERVED_PASS": "Review whether the self-declared check actually exercises the requirement; exit zero alone is insufficient.",
 }
 
@@ -60,8 +72,15 @@ def trace(report: dict[str, Any], *, requirement_id: str | None = None) -> dict[
                 edges.append({"from": obligation, "to": receipt,
                               "relation": "MATCHED_BY_SELF_DECLARED_KIND", "strength": "PROCESS_OBSERVATION_ONLY"})
                 if state == "OBSERVED_PASS":
-                    edges.append({"from": receipt, "to": snapshot_node,
-                                  "relation": "SOURCE_FINGERPRINT_MATCHES_CURRENT", "strength": "CONTENT_FRESHNESS_ONLY"})
+                    if row.get("binding_kind") == "declared_scope":
+                        scoped_node = f"source:declared:{rid}:{kind}"
+                        nodes.append({"id": scoped_node, "role": "change",
+                                      "declared_scope_only": True, "dependency_completeness_proven": False})
+                        edges.append({"from": receipt, "to": scoped_node,
+                                      "relation": "DECLARED_INPUTS_MATCH_CURRENT", "strength": "DECLARED_CONTENT_FRESHNESS_ONLY"})
+                    else:
+                        edges.append({"from": receipt, "to": snapshot_node,
+                                      "relation": "SOURCE_FINGERPRINT_MATCHES_CURRENT", "strength": "CONTENT_FRESHNESS_ONLY"})
             if state != "OBSERVED_PASS":
                 blockers.append({"scope": kind, "state": state,
                                  "receipt_id": receipt_id,

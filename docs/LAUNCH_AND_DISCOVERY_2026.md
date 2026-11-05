@@ -57,7 +57,7 @@ Once you've reviewed and installed the source candidate locally, use `bash scrip
 
 1. Merge the trusted inspector hotfix; verify its Git blob on `main`.
 2. Review and merge the release source under effective branch protections without bypassing failed required checks.
-3. Obtain actual GitHub Actions pass/fail evidence for Python 3.10 and 3.13 across Linux, Windows and macOS.
+3. Obtain actual GitHub Actions pass/fail evidence for Python 3.10 and 3.15 across Linux, Windows and macOS.
 4. Obtain real GitHub Artifact Attestation and independently verify the repo, signer workflow, source ref, full commit SHA, and report hash.
 5. Tag a GitHub **Pre-release** with a source archive, wheel if properly built, SHA-256 sums, limitations, and link to test run IDs.
 6. Publish a 30–60 second **real CLI demo** showing a requirement labeled `UNTESTED` after a green unrelated test and the source fingerprint becoming stale after a code edit. No fabricated screenshots or performance claims.
