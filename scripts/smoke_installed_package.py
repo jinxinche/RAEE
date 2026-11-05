@@ -21,7 +21,9 @@ def main():
         root = Path(folder).resolve(strict=True)
         venv.EnvBuilder(with_pip=True).create(root / 'venv')
         python = root / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-        python_command = (str(python), '-I')
+        # -I deliberately ignores PYTHONIOENCODING. Select UTF-8 explicitly for
+        # redirected output on Windows Python versions before the UTF-8 default.
+        python_command = (str(python), '-I', '-X', 'utf8')
         console = python.parent / ('raee-lite.exe' if os.name == 'nt' else 'raee-lite')
         project = root / 'project'
         project.mkdir()

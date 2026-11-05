@@ -97,14 +97,17 @@ class DependencyGraphEdgeTests(unittest.TestCase):
 
     def test_total_byte_budget_boundary_is_cumulative(self):
         sources = {"app.py": "import helper\n", "helper.py": "VALUE = 1\n"}
-        for name, source in sources.items():
-            self.write(name, source)
-        count = sum(len(source.encode("utf-8")) for source in sources.values())
-        for limit, exhausted in ((count - 1, True), (count, False)):
-            with self.subTest(limit=limit), patch("raee_lite.dependency_audit.MAX_TOTAL_BYTES", limit):
-                result = self.audit(*sources)
-                self.assertEqual("TOTAL_BYTE_BUDGET_EXCEEDED" in result["limitations"], exhausted)
-                self.assertLessEqual(result["bytes_read"], limit)
+        for newline in (b"\n", b"\r\n"):
+            for name, source in sources.items():
+                (self.root / name).write_bytes(source.encode("utf-8").replace(b"\n", newline))
+            # Budget the actual on-disk bytes, including CRLF on Windows.
+            count = sum(len((self.root / name).read_bytes()) for name in sources)
+            for limit, exhausted in ((count - 1, True), (count, False)):
+                with self.subTest(newline=newline, limit=limit), patch(
+                        "raee_lite.dependency_audit.MAX_TOTAL_BYTES", limit):
+                    result = self.audit(*sources)
+                    self.assertEqual("TOTAL_BYTE_BUDGET_EXCEEDED" in result["limitations"], exhausted)
+                    self.assertLessEqual(result["bytes_read"], limit)
 
 
 if __name__ == "__main__":

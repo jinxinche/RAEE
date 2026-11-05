@@ -66,6 +66,17 @@ on macOS ARM64 / Python 3.11.16, with no failures, errors or skips. This adds
 the offline PR risk smoke passed 7/7. The final PR records hosted outcomes for
 its exact commit, including actual platform-specific skip counts.
 
+The first hosted follow-up, [run 42071847117](https://github.com/jinxinche/RAEE/actions/runs/42071847117),
+exposed a Windows-only fixture error: a byte-budget test counted LF text before
+Windows wrote CRLF bytes. The fixture now counts serialized bytes and explicitly
+exercises both newline forms. No production budget or test minimum was relaxed.
+The same run exposed Windows Python 3.10 subprocess decoding errors in the
+installation smoke: isolated Python ignores `PYTHONIOENCODING`. Isolated smoke
+interpreters now use explicit `-X utf8`; the console entry point retains an
+explicit UTF-8 environment. Output-content and exit-code assertions remain active.
+See Python's [isolated-mode and UTF-8 options](https://docs.python.org/3.10/using/cmdline.html)
+for why an environment variable alone does not configure these isolated children.
+
 The resource fixtures below were measured locally before and after the focused
 fixes. They are small synthetic observations, not independent benchmarks or
 general speedup claims; the test gate asserts bounded operations and correctness,

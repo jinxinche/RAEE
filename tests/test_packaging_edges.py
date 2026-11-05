@@ -66,7 +66,7 @@ class PackagingEdgesTests(unittest.TestCase):
                    PIP_DISABLE_PIP_VERSION_CHECK='1')
         env.update(extra_env or {})
         result = subprocess.run(
-            [sys.executable, '-I', str(SMOKE), '--wheel-dir', str(self.wheel_dir)],
+            [sys.executable, '-I', '-X', 'utf8', str(SMOKE), '--wheel-dir', str(self.wheel_dir)],
             cwd=self.root, env=env, text=True, encoding='utf-8',
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
         return result
@@ -76,7 +76,8 @@ class PackagingEdgesTests(unittest.TestCase):
         poison = self.root / 'poison' / 'raee_lite'
         poison.mkdir(parents=True)
         (poison / '__init__.py').write_text("raise RuntimeError('PYTHONPATH leaked')\n")
-        result = self.run_smoke({'PYTHONPATH': str(poison.parent)})
+        result = self.run_smoke({'PYTHONPATH': str(poison.parent),
+                                 'PYTHONIOENCODING': 'ascii', 'PYTHONUTF8': '0'})
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(result.stdout.count('Added requirement: R1'), 2, result.stdout)
         self.assertIn('Installed wheel:', result.stdout)
