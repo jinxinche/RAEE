@@ -1,10 +1,20 @@
 # RAEE-Lite v0.10.0rc2 — solo-maintainer review record
 
-**Scope:** Preliminary AI-assisted technical inspection of PR #2 by ChatGPT using the maintainer's connected GitHub account, plus local release-candidate tests. **Not an independent human security review; not a maintainer's personal sign-off.** Prepared 2026-10-29.
+**Historical scope:** Preliminary AI-assisted technical inspection of PR #2 by ChatGPT using the maintainer's connected GitHub account, plus local release-candidate tests. **Not an independent human security review; not a maintainer's personal sign-off.** Prepared 2026-10-29; integration status updated 2026-11-05.
 
-**Decision:** CONDITIONAL / NOT YET RELEASE READY. PR #2 must remain unmerged until actual branch protection is confirmed and the maintainer explicitly accepts the 16 trust-boundary changes. A successful inspection job means **inventory completed**, not approval.
+**Original decision (2026-10-29):** CONDITIONAL / NOT YET RELEASE READY. The recommendation then was to keep PR #2 unmerged until actual branch protection was confirmed and the maintainer explicitly accepted the 16 trust-boundary changes. A successful inspection job meant **inventory completed**, not approval. The merge-pending status is superseded by the update below; this record does not establish that the original acceptance conditions were met.
 
-## Evidence actually inspected
+## Integration and validation update — 2026-11-05
+
+The earlier PR stack, including PR #2, is merged into `main` at [`5a8cc702674a5e4005f0efe3891b39727c5f7897`](https://github.com/jinxinche/RAEE/commit/5a8cc702674a5e4005f0efe3891b39727c5f7897). [Main CI run 41978577201](https://github.com/jinxinche/RAEE/actions/runs/41978577201) passed all six OS/Python jobs, with 268 tests reported per job. Main integration and this baseline matrix are therefore completed historical milestones.
+
+Candidate validation is tied to the exact PR head: consult its description and Checks tab for completed local and hosted results. The expanded matrix contains twelve jobs; workflow declarations alone do not establish success. Total and per-module minima live in [`scripts/run_reviewed_suite.py`](../scripts/run_reviewed_suite.py). See the [2026-11-05 engineering audit](ENGINEERING_AUDIT_2026-11-05.md) for changes and remaining acceptance work. A green matrix does not establish live branch protection, independent review or dependency closure.
+
+Windows exceptions are enumerated by exact test ID in `WINDOWS_CRITICAL_SKIPS`. The allowlist size is not an observed skip count: retain actual per-job summaries and logs. POSIX runners must execute the corresponding permission, FIFO and process-group coverage; the exception list does not authorize POSIX skips.
+
+**Current disposition:** The merged baseline has hosted regression evidence; trusted production release acceptance remains unverified. Neither a merge nor a green matrix proves live branch protection, enforced required checks, independent review, real GitHub provenance verification, or an actual fork-permission exercise. The bounded static dependency audit remains advisory and does not prove dependency closure or rewrite historical receipts.
+
+## Evidence actually inspected in the original review
 
 1. GitHub [PR #2](https://github.com/jinxinche/RAEE/pull/2), its changed-file list, source in `release/raee-lite-v0.10.0rc2`, and the PR workflow.
 2. [GitHub Actions run 40836793496](https://github.com/jinxinche/RAEE/actions/runs/40836793496): `pr-boundary-inspection` **success**, while explicitly warning `REVIEW REQUIRED` for 16 security-sensitive paths.
@@ -12,7 +22,7 @@
 4. Local RC2 source: all **184 tests across 14 unittest modules** passed when executed separately. A combined regression invocation in this environment exceeded the tool time limit, therefore a single complete uninterrupted runner pass is **not** claimed. These local results are not a substitute for the exact GitHub commit's cross-platform tests.
 5. Checked: `.github/workflows/pr-boundary.yml`, `tests.yml`, `trusted-evidence.yml`, `pr-evidence-example.yml.example`, `CODEOWNERS`, `.github/branch-protection.json`, `pyproject.toml`, selected executable scripts, `ci_attestation.py`, and source tests. This was targeted review, not exhaustive formal verification or complete secret scanning.
 
-## 16 sensitive paths requiring maintainer acknowledgement
+## 16 sensitive paths flagged in the original review
 
 - GitHub governance: `.github/CODEOWNERS`, `.github/branch-protection.json`
 - GitHub workflows: `.github/workflows/pr-boundary.yml`, `.github/workflows/pr-evidence-example.yml.example`, `.github/workflows/tests.yml`, `.github/workflows/trusted-evidence.yml`, `.github/workflows/trusted-evidence.yml.example`
@@ -20,9 +30,11 @@
 - Executable scripts: `scripts/create_public_repo.sh`, `scripts/local_pr_attack_smoke.py`, `scripts/preflight_public.py`, `scripts/protect_main.sh`, `scripts/publish_existing_repo.sh`, `scripts/run_reviewed_suite.py`, `scripts/verify_independent.sh`
 - Provenance code: `src/raee_lite/ci_attestation.py`
 
-`scripts/pr_boundary.py` no longer appears in the changed-path list since its exact content is already on trusted `main`.
+At the original review, `scripts/pr_boundary.py` no longer appeared in the changed-path list because its exact content was already on `main`; that description did not verify effective branch protection.
 
-## Findings
+## Historical findings — 2026-10-29
+
+The observations below retain their original review scope. Statements about missing runs, workflow triggers, connector access or owner acceptance describe that inspection, not a fresh check of the current candidate. The update above supersedes the missing baseline-matrix and pending-integration status.
 
 ### Positive, but bounded observations
 - The PR inventory executes the baseline inspector and treats the PR head as **data**; it does not install or execute PR-head Python files in the scanner step.
@@ -51,6 +63,8 @@ bash scripts/protect_main.sh --solo-maintainer --check
 
 The script validates the policy's safety-critical fields and reads back GitHub's classic protection response. This is a proposed operational step, **not an operation already performed**. Inspect Settings → Rules → Rulesets separately. Do not overwrite other active rules casually.
 
-## Final disposition
+## Original disposition and outstanding acceptance
 
-**Pending:** owner review of flagged changes; effective rules confirmation; safe PR merge; six real cross-platform jobs; independent provenance verification; real Fork PR permission exercise. A green inventory alone does not authorize merging or establish production security.
+**Originally pending (2026-10-29):** owner review of flagged changes; effective rules confirmation; safe PR merge; six real cross-platform jobs; independent provenance verification; real fork PR permission exercise.
+
+**Updated (2026-11-05):** The earlier stack is merged and the six-job main baseline passed. Candidate run outcomes are recorded against the exact PR head in its Checks tab. Owner acceptance and independent review, effective rules and required-check enforcement, independent provenance verification, and an actual fork PR permission exercise still require their own evidence. A green inventory or baseline matrix does not establish production security.

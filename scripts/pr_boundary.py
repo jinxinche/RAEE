@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 MAX_FILES = 10000
+MAX_ENTRIES = 20000  # Includes directories, even empty ones; bounds traversal work.
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 100 * 1024 * 1024
 BLOCKED_PREFIXES = (
@@ -42,45 +43,48 @@ def snapshot(root: Path) -> dict[str, str]:
     root = root.resolve(strict=True)
     found: dict[str, str] = {}
     total = 0
-    for current, dirs, files in os.walk(root, followlinks=False):
-        # Surface new/changed directory symlinks as an explicit review boundary;
-        # never traverse them or silently omit them from the diff inventory.
-        safe_dirs = []
-        for d in sorted(dirs):
-            if d in {'.git', '.raee', '__pycache__', '.venv', '.tox'}:
-                continue
-            candidate = Path(current) / d
-            if candidate.is_symlink():
-                if len(found) >= MAX_FILES:
-                    raise ValueError('PR inspection file-count limit exceeded')
-                found[candidate.relative_to(root).as_posix()] = symlink_signature(candidate)
-            else:
-                safe_dirs.append(d)
-        dirs[:] = safe_dirs
-        for name in sorted(files):
-            p = Path(current) / name
-            relative = p.relative_to(root).as_posix()
-            meta = p.lstat()
-            if stat.S_ISLNK(meta.st_mode):
-                if len(found) >= MAX_FILES:
-                    raise ValueError('PR inspection file-count limit exceeded')
-                found[relative] = symlink_signature(p)
-                continue
-            if not stat.S_ISREG(meta.st_mode):
-                raise ValueError(f'Unsafe special file: {relative}')
-            if len(found) >= MAX_FILES or meta.st_size > MAX_FILE_BYTES or total + meta.st_size > MAX_TOTAL_BYTES:
-                raise ValueError('PR inspection size limit exceeded; refuse to mark safe')
-            total += meta.st_size
-            digest = hashlib.sha256()
-            with p.open('rb') as inp:
-                remaining = meta.st_size
-                while remaining:
-                    chunk = inp.read(min(65536, remaining))
-                    if not chunk:
-                        raise ValueError('File changed while reading')
-                    remaining -= len(chunk)
-                    digest.update(chunk)
-            found[relative] = digest.hexdigest()
+    entries = 0
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        # Iterate incrementally instead of materializing an unbounded directory
+        # listing. Unlike os.walk's default, scandir propagates traversal errors.
+        with os.scandir(current) as children:
+            for entry in children:
+                entries += 1
+                if entries > MAX_ENTRIES:
+                    raise ValueError('PR inspection entry-count limit exceeded')
+                p = Path(entry.path)
+                relative = p.relative_to(root).as_posix()
+                meta = entry.stat(follow_symlinks=False)
+                # Classify links before the metadata exception. Cache/environment
+                # names are ordinary PR data and cannot hide a link or script.
+                if stat.S_ISLNK(meta.st_mode):
+                    if len(found) >= MAX_FILES:
+                        raise ValueError('PR inspection file-count limit exceeded')
+                    found[relative] = symlink_signature(p)
+                    continue
+                if stat.S_ISDIR(meta.st_mode):
+                    # Only the checkout's own Git metadata is out of scope.
+                    if current == root and entry.name == '.git':
+                        continue
+                    pending.append(p)
+                    continue
+                if not stat.S_ISREG(meta.st_mode):
+                    raise ValueError(f'Unsafe special file: {relative}')
+                if len(found) >= MAX_FILES or meta.st_size > MAX_FILE_BYTES or total + meta.st_size > MAX_TOTAL_BYTES:
+                    raise ValueError('PR inspection size limit exceeded; refuse to mark safe')
+                total += meta.st_size
+                digest = hashlib.sha256()
+                with p.open('rb') as inp:
+                    remaining = meta.st_size
+                    while remaining:
+                        chunk = inp.read(min(65536, remaining))
+                        if not chunk:
+                            raise ValueError('File changed while reading')
+                        remaining -= len(chunk)
+                        digest.update(chunk)
+                found[relative] = digest.hexdigest()
     return found
 
 

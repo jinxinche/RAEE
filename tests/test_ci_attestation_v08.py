@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
 import subprocess
@@ -139,7 +140,17 @@ class CiAttestationTests(unittest.TestCase):
 
     def test_verified_identity_is_pinned_in_gh_invocation(self):
         self.create()
-        output = subprocess.CompletedProcess(['gh'], 0, b'[{"verificationResult":true}]', b'')
+        digest = hashlib.sha256((self.root / '.raee/ci-evidence.json').read_bytes()).hexdigest()
+        identity = f'https://github.com/{REPO}/{WORKFLOW}@{REF}'
+        # Model the verified statement envelope, not an invented boolean flag.
+        rows = [{'verificationResult': {
+            'statement': {'_type': 'https://in-toto.io/Statement/v1',
+                          'predicateType': 'https://slsa.dev/provenance/v1',
+                          'subject': [{'name': 'ci-evidence.json', 'digest': {'sha256': digest}}]},
+            'signature': {'certificate': {'subjectAlternativeName': identity,
+                                          'issuer': 'https://token.actions.githubusercontent.com'}},
+        }}]
+        output = subprocess.CompletedProcess(['gh'], 0, json.dumps(rows).encode(), b'')
         with patch('raee_lite.ci_attestation.subprocess.run', return_value=output) as run:
             result = self.verify(gh_executable='/usr/bin/gh', report_path=self.root / '.raee/report.json')
         cmd = run.call_args.args[0]
@@ -147,7 +158,9 @@ class CiAttestationTests(unittest.TestCase):
         self.assertTrue(result['report_content_checked'])
         self.assertIn('--source-digest', cmd)
         self.assertEqual(cmd[cmd.index('--source-digest') + 1], self.sha)
-        self.assertEqual(cmd[cmd.index('--signer-workflow') + 1], f'{REPO}/{WORKFLOW}')
+        self.assertEqual(cmd[cmd.index('--cert-identity') + 1], identity)
+        self.assertEqual(cmd[cmd.index('--signer-digest') + 1], self.sha)
+        self.assertEqual(cmd[cmd.index('--hostname') + 1], 'github.com')
         self.assertIn('--deny-self-hosted-runners', cmd)
         self.assertFalse(run.call_args.kwargs.get('shell', False))
 

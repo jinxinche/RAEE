@@ -9,6 +9,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from .safe_io import read_bytes, strict_json_loads
+from .safe_process import capture_bounded
 
 
 @dataclass(frozen=True)
@@ -27,18 +29,27 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
     checks: list[Check] = []
     notes: list[str] = []
     package_json = root / "package.json"
-    if package_json.is_file() and not package_json.is_symlink():
+    if package_json.is_symlink():
+        notes.append("package.json is a symlink; package script discovery skipped")
+    elif package_json.is_file():
         try:
             if package_json.stat().st_size > 1_000_000:
                 raise ValueError('package.json exceeds discovery size limit')
-            pkg = json.loads(package_json.read_text(encoding="utf-8"))
+            pkg = strict_json_loads(read_bytes(package_json, 1_000_000))
             if not isinstance(pkg, dict):
                 raise ValueError('package.json must contain an object')
             scripts = pkg.get("scripts", {})
             if not isinstance(scripts, dict):
-                scripts = {}
-            npm = shutil.which("npm")
-            if not npm:
+                raise ValueError('package.json scripts must contain an object')
+            manager = pkg.get("packageManager")
+            supported_manager = ("packageManager" not in pkg or
+                                 isinstance(manager, str) and
+                                 re.fullmatch(r"npm@[^\s]+", manager) is not None)
+            npm = shutil.which("npm") if supported_manager else None
+            if not supported_manager:
+                notes.append("Unsupported package.json packageManager; package script discovery "
+                             "skipped; add explicit commands for the declared package manager")
+            elif not npm:
                 notes.append("package.json found but npm is unavailable in PATH")
             else:
                 for kind in ("test", "typecheck", "lint", "build"):
@@ -53,21 +64,33 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
         except (OSError, UnicodeError, ValueError, TypeError) as ex:
             notes.append(f"Could not parse package.json: {type(ex).__name__}")
 
-    python_indicators = [root / "pyproject.toml", root / "pytest.ini", root / "setup.cfg"]
-    has_pytest_tests = (root / "tests").is_dir() and any((root / "tests").glob("test_*.py"))
-    has_pytest_cfg = (root / "pytest.ini").is_file() or (root / "conftest.py").is_file()
-    if has_pytest_tests or has_pytest_cfg:
-        # pytest is an explicit project test command. If it is absent, the failure is
-        # reported instead of silently replacing it with a different test runner.
-        checks.append(Check("auto:python:test", "test", (sys.executable, "-m", "pytest", "-q"),
-                            "Python tests/ or pytest configuration found; pytest must be installed"))
-    elif (root / "tests").is_dir() and any((root / "tests").glob("*_test.py")):
-        checks.append(Check("auto:python:unittest", "test", (sys.executable, "-m", "unittest", "discover", "-s", "tests"),
-                            "Python unittest-style tests detected"))
+    python_indicators = [root / name for name in
+                         ("tests", "pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg")]
+    linked_python = [path.name for path in python_indicators if path.is_symlink()]
+    if linked_python:
+        notes.append("Python test discovery skipped for symlinked paths: " +
+                     ", ".join(linked_python) + "; add explicit commands")
+    else:
+        tests = root / "tests"
+        has_pytest_tests = tests.is_dir() and any(
+            not path.is_symlink() and path.is_file()
+            for pattern in ("test_*.py", "*_test.py") for path in tests.glob(pattern)
+        )
+        has_pytest_cfg = (root / "pytest.ini").is_file() or (root / "conftest.py").is_file()
+        if has_pytest_tests or has_pytest_cfg:
+            # Both filename patterns are pytest defaults; neither identifies the
+            # test framework. unittest can silently pass without collecting them.
+            # A missing pytest must fail instead of selecting another runner.
+            checks.append(Check("auto:python:test", "test", (sys.executable, "-m", "pytest", "-q"),
+                                "Python tests/ or pytest configuration found; pytest must be installed"))
 
-    if (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
-        if shutil.which("ruff"):
-            checks.append(Check("auto:python:lint", "lint", (shutil.which("ruff") or "ruff", "check", "."),
+    ruff_configs = [root / "ruff.toml", root / ".ruff.toml"]
+    if any(path.is_symlink() for path in ruff_configs):
+        notes.append("Ruff discovery skipped for symlinked configuration; add explicit commands")
+    elif any(path.is_file() for path in ruff_configs):
+        ruff = shutil.which("ruff")
+        if ruff:
+            checks.append(Check("auto:python:lint", "lint", (ruff, "check", "."),
                                 "Ruff configuration detected"))
         else:
             notes.append("Ruff configuration found, but ruff is not available in PATH")
@@ -80,9 +103,10 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
 def risk_signals(root: Path) -> list[dict]:
     """Potential high-impact paths changed in git, not security verdicts."""
     from .core import git_context
+    from .safe_process import git_metadata_command
     ctx = git_context(root)
     if not ctx.get("available"):
-        return [{"level": "info", "reason": "No Git baseline available; changed-file risk scan unavailable", "paths": []}]
+        return [{"level": "info", "reason": ctx.get('reason') or "No Git baseline available; changed-file risk scan unavailable", "paths": []}]
     patterns = {
         "modified_tests": re.compile(r"(^|/)(tests?/|__tests__/|[^/]*\.test\.|[^/]*_test\.)", re.I),
         "auth_or_permissions": re.compile(r"(^|/)(auth|login|session|permission|access|roles?)(/|\.|$)", re.I),
@@ -104,11 +128,18 @@ def risk_signals(root: Path) -> list[dict]:
                       and not p.startswith("-") and not p.startswith(".raee/")][:40]
         if test_paths:
             try:
-                diff = subprocess.run(
-                    [git, "diff", "HEAD", "--no-ext-diff", "--unified=0", "--", *test_paths],
-                    cwd=root, capture_output=True, check=False, timeout=15,
+                command = [git, '--no-optional-locks', '-c', 'core.fsmonitor=false']
+                command = git_metadata_command(command, root)
+                if command is None:
+                    found.append({'level': 'info', 'reason': 'git_filter_config_unavailable', 'paths': []})
+                    return found
+                code, raw, truncated = capture_bounded(
+                    [*command, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--unified=0", "--", *test_paths],
+                    root,
                 )
-                lines = diff.stdout[:250_000].decode("utf-8", errors="replace").splitlines()
+                if code and not truncated:
+                    raise ValueError('Git diff unavailable')
+                lines = raw.decode("utf-8", errors="replace").splitlines()
                 added_skips = []
                 removed_asserts = []
                 for line in lines:
@@ -125,9 +156,9 @@ def risk_signals(root: Path) -> list[dict]:
                 if removed_asserts:
                     found.append({"level": "review", "reason": "removed_test_assertions", "paths": test_paths[:20],
                                   "note": "Possible weakening: assertion lines removed in tracked tests."})
-                if len(diff.stdout) > 250_000:
+                if truncated:
                     found.append({"level": "info", "reason": "test_diff_truncated", "paths": []})
-            except (OSError, subprocess.TimeoutExpired):
+            except (OSError, ValueError, subprocess.TimeoutExpired):
                 found.append({"level": "info", "reason": "test_diff_scan_unavailable", "paths": []})
     if ctx.get("changed_paths_truncated"):
         found.append({"level": "info", "reason": "Changed path listing truncated", "paths": []})

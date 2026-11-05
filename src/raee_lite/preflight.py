@@ -6,12 +6,14 @@ static and may be incomplete. Targeted paths only; no unbounded file traversal.
 from __future__ import annotations
 
 import json
+import os
 import re
-import stat
 from pathlib import Path
+from .safe_io import read_bytes
 
 MAX_WORKFLOW_BYTES = 256_000
 MAX_WORKFLOWS = 80
+MAX_WORKFLOW_ENTRIES = 1000
 ACTION = re.compile(r"(?m)^\s*-?\s*uses:\s*([^\s#]+)")
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-fA-F]{40}$")
 
@@ -19,16 +21,9 @@ PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-
 def _small_regular_file(path: Path, limit: int) -> str | None:
     """Reject symlinks and special files, and bound reads."""
     try:
-        info = path.lstat()
+        data = read_bytes(path, limit)
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
-        raise ValueError('Untrusted, non-regular, or oversized preflight input')
-    # If the path changes during read, only a bounded text value is used.
-    with path.open('rb') as stream:
-        data = stream.read(limit + 1)
-    if len(data) > limit:
-        raise ValueError('Preflight input exceeds byte budget')
     return data.decode('utf-8', errors='replace')
 
 
@@ -57,10 +52,21 @@ def evaluate(root: Path) -> dict:
         if (root / '.github').is_symlink() or workflow_dir.is_symlink() or not workflow_dir.is_dir():
             mark('WORKFLOW_DIR_UNSAFE', 'blocker', 'Workflow directory is not a regular directory.', 'Review symlink or special paths.')
         else:
-            workflow_files = sorted([p for p in workflow_dir.iterdir() if p.suffix in ('.yml', '.yaml')])
-            if len(workflow_files) > MAX_WORKFLOWS:
+            limited = False
+            with os.scandir(workflow_dir) as entries:
+                for index, entry in enumerate(entries):
+                    if index >= MAX_WORKFLOW_ENTRIES:
+                        limited = True
+                        break
+                    p = Path(entry.path)
+                    if p.suffix in ('.yml', '.yaml'):
+                        if len(workflow_files) >= MAX_WORKFLOWS:
+                            limited = True
+                            break
+                        workflow_files.append(p)
+            workflow_files.sort()
+            if limited:
                 mark('WORKFLOW_LIMIT', 'blocker', 'Too many workflow files for bounded review.', 'Review workflow directory manually.')
-                workflow_files = workflow_files[:MAX_WORKFLOWS]
     if not workflow_files:
         mark('CI_NOT_FOUND', 'review', 'No active GitHub Actions workflow detected.', 'Add low-privilege tests and explicit PR policy.')
 

@@ -125,8 +125,13 @@ def main(argv: list[str] | None = None) -> int:
     cv = sub.add_parser('validate-corpus', help='Evaluate annotated, explicitly approved local agent JSONL fixtures')
     cv.add_argument('--index', required=True, help='JSON index with synthetic/consented case labels')
     cv.add_argument('--out', required=True, help='Aggregate JSON results; raw logs are not copied')
+    cv.add_argument('--require-exact', action='store_true', help='Fail on mismatches or incomplete parsing')
     args = parser.parse_args(argv)
-    root = Path(args.project).resolve()
+    try:
+        root = Path(args.project).resolve()
+    except (ValueError, OSError, RuntimeError) as exc:
+        # pathlib uses RuntimeError for symlink loops on Python 3.10-3.12.
+        parser.exit(2, f"Error: {exc}\n")
     def project_path(value: str) -> Path:
         path = Path(value).expanduser()
         return path if path.is_absolute() else root / path
@@ -134,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         if not root.is_dir():
             raise ValueError(f"Project folder does not exist: {root}")
         if args.action == 'validate-corpus':
-            return validation.main(['--index', str(project_path(args.index)), '--out', str(project_path(args.out))])
+            return validation.main(['--index', str(project_path(args.index)), '--out', str(project_path(args.out))]
+                                   + (['--require-exact'] if args.require_exact else []))
         if args.action == 'ci-export':
             result = ci_attestation.export(root, expected_repo=args.expected_repo,
                     trusted_ref=args.trusted_ref, workflow=args.workflow,
@@ -172,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0
         if args.action == "isolate":
+            if not 128 <= args.memory_mb <= 4096:
+                raise ValueError("Memory limit must be between 128 and 4096 MB")
             if not args.dry_run:
                 _check_ci_execution(args)
             cmd = args.command[1:] if args.command and args.command[0] == "--" else args.command

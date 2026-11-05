@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**Código candidato disponible públicamente:** [rama v0.10.0rc2](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [PR #2](https://github.com/jinxinche/RAEE/pull/2). Este repositorio incluye el código de la CLI y su configuración de instalación. No se afirma una versión estable, publicación en PyPI ni certificación independiente de procedencia. En un entorno aislado, prueba `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` y `raee-lite status`. Resultado: `UNTESTED`; el estado 1 indica una carencia de evidencias, no un fallo del programa. Por defecto no se ejecutan pruebas del proyecto.
+**Código candidato disponible públicamente:** [código en main](https://github.com/jinxinche/RAEE/tree/main) · [PR #2 integrado](https://github.com/jinxinche/RAEE/pull/2) · [auditoría y estado de validación del 05-11-2026](ENGINEERING_AUDIT_2026-11-05.md). Este repositorio incluye el código de la CLI y su configuración de instalación. No se afirma una versión estable, publicación en PyPI ni certificación independiente de procedencia. En un entorno aislado, prueba `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` y `raee-lite status`. Resultado: `UNTESTED`; el estado 1 indica una carencia de evidencias, no un fallo del programa. Por defecto no se ejecutan pruebas del proyecto.
 
 
 ## ¿Por qué RAEE-Lite?

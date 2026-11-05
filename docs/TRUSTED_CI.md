@@ -13,18 +13,21 @@ executes attacker-controlled code.
 ## Trusted workflow pattern
 
 1. Protect `main` and require reviews; keep automation logic on the trusted branch.
-2. Review `.github/workflows/trusted-evidence.yml.example`, pin every action to a
-   vetted SHA, and rename to `trusted-evidence.yml` only after review.
+2. The legacy [v0.8 reference example](../.github/workflows/trusted-evidence.yml.example)
+   is an opt-in template for installation only after review. This repository
+   already has a separate [enabled workflow](../.github/workflows/trusted-evidence.yml),
+   triggered only by manual `workflow_dispatch`; review it directly rather than
+   replacing it with the legacy template. Review every action's pinned SHA before use.
 3. `collect` job: no OIDC token permissions, GitHub contents read-only, no PR
    trigger; executes deliberately approved regression suite on protected `main`.
 4. `collect` job exports **bounded, redacted metadata** in `.raee/ci-evidence.json`.
-5. `sign` job: downloads only that artifact from the same workflow run, uses
+5. `sign` job: downloads the handoff artifact from the same workflow run, uses
    `id-token:write` and `attestations:write`, **never runs repository code**.
 6. The independent reviewer downloads the attested artifact and calls
    `raee-lite ci-verify` with an out-of-band pinned repository, ref, workflow,
    and full source commit. Local strings from the file cannot establish trust.
 
-The sample does **not** automatically attest PR heads. Use a separate
+Neither workflow automatically attests PR heads. Use a separate
 `pull_request` workflow with read-only permissions for optional untrusted
 source inspection; do not add `pull_request_target` + checkout of PR code,
 workflows that sign user-submitted reports, write tokens, or developer secrets.
@@ -41,9 +44,22 @@ raee-lite ci-export \
 ```
 
 The output is not trustworthy until GitHub Actions creates an artifact
-attestation for the **exact** `.raee/ci-evidence.json` bytes. The report has an
-SHA-256 digest in the claim, but raw report contents are NOT uploaded by default,
-reducing the risk of exposing private acceptance requirements or test details.
+attestation for the **exact** `.raee/ci-evidence.json` bytes. The claim binds the
+report through its SHA-256 digest.
+
+The legacy `.yml.example` specifies an upload of only `.raee/ci-evidence.json`,
+without the full report. The enabled manual workflow instead uploads **both
+the claim and the full `report.json`** in its `ci-evidence-claim` handoff and
+publishes both with the attestation bundle in `independently-verifiable-evidence`.
+Only `ci-evidence.json` is the direct attestation subject; report integrity is
+checked through the digest it contains.
+
+The full report can contain requirement text, project goals, boundary notes,
+paths and environment metadata. Claim metadata minimization does not redact
+the separately uploaded report. Review sensitive inputs before generating,
+exporting and uploading evidence. If report bytes change, regenerate the report
+from consistent source evidence, re-export its claim and obtain a new attestation;
+do not redact an already attested report and retain the old digest.
 
 ## Independent verification (requires installed, trusted GitHub CLI)
 
@@ -72,6 +88,16 @@ checks the authenticated **claim** about the report, not access to the original
 report. By default, explicit acceptance evidence must be recorded as passing;
 `--allow-incomplete` permits viewing a verified failing/incomplete claim,
 without marking it green.
+
+The current verification result preserves `report_outcome`,
+`strict_check_passed` and the applied `require_passed` policy. The first two
+are signed claims, not independently re-executed test results.
+`--allow-incomplete` sets `require_passed` to `false`; a successful
+`GITHUB_ATTESTATION_VERIFIED` result alone must not be interpreted as passing
+acceptance evidence. The output also includes `claimed_run_id` and
+`run_identity_verified: false`: run ID, run attempt and event identity are not
+independently verified. Pinned repository/ref/commit/workflow provenance does
+not establish which particular workflow invocation produced the claimed tests.
 
 ## Known limitations
 

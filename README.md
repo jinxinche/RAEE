@@ -10,7 +10,11 @@
 
 ### Try the public release candidate
 
-**Status: public source release candidate, not a stable or security-certified release.** This repository includes the CLI source and installation metadata. See [PR #13 and its validation runs](https://github.com/jinxinche/RAEE/pull/13) for the dependency audit and cross-platform regression evidence. Independent provenance verification and branch-protection acceptance remain separate release gates.
+**Status: public source release candidate, not a stable or security-certified release.** This repository includes the CLI source and installation metadata. Independent provenance verification and branch-protection acceptance remain separate release gates.
+
+**Merged baseline:** The earlier PR stack is merged into `main` at `5a8cc702674a5e4005f0efe3891b39727c5f7897`. [Main CI run 41978577201](https://github.com/jinxinche/RAEE/actions/runs/41978577201) passed all six OS/Python jobs with 268 tests per job. Those results apply to that baseline.
+
+**Working candidate (2026-11-06):** The regression suite includes dedicated negative controls from two rounds of focused review tasks. The PR description and Checks tab record validation against its exact head commit, including the twelve-job hosted matrix. See the [first engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md) and [follow-up audit](docs/ENGINEERING_FOLLOWUP_2026-11-06.md) for changes and remaining acceptance work.
 
 Try it from a **disposable Python environment**, after inspecting the source:
 
@@ -37,7 +41,7 @@ raee-lite check
 
 **What makes it useful:** Coding agents' statements, changed files, executed checks and unresolved requirements are *different evidence types*. RAEE-Lite keeps them separate rather than treating a green test as proof that a requested feature works.
 
-[Reproduction details](examples/DEMO.md) · [Security boundaries](SECURITY.md) · [Early-access feedback](https://github.com/jinxinche/RAEE/issues/7) · [Local validation and pending release gates](https://github.com/jinxinche/RAEE/pull/2)
+[Reproduction details](examples/DEMO.md) · [Security boundaries](SECURITY.md) · [Early-access feedback](https://github.com/jinxinche/RAEE/issues/7) · [Engineering audit and pending release gates](docs/ENGINEERING_AUDIT_2026-11-05.md)
 
 ### New: proof-obligation trace (experimental)
 
@@ -100,6 +104,12 @@ raee-lite check         # Generate an evidence-gap report
 
 The default workflow does not run project-owned scripts. Executing tests is an explicit opt-in and must be limited to code and environments you trust.
 
+Concurrent CLI writers serialize receipt appends, requirement/contract edits,
+transcript imports and evidence links. Keep `.raee/*.lock` files in place while
+writers may be running. If an audit detects evidence changes during report
+generation, let the writers finish and retry. Manual file edits and
+network-filesystem locking are outside this validated concurrency boundary.
+
 ## Privacy and trust boundaries
 
 - Imported agent logs are **untrusted input**, not instructions.
@@ -121,13 +131,15 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 
 ## Roadmap and project status
 
-The near-term priorities are a reviewed public source release, real GitHub Actions results on Linux/Windows/macOS, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
+The near-term priorities are hosted verification of the current candidate, branch-protection acceptance, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
-**Current status: public source release candidate with recorded experimental cross-platform results; protected-main acceptance and independent provenance verification remain pending.** Please do not interpret the README as a claim of production readiness.
+**Current status: the earlier stack is merged with a passing six-job main CI run; candidate validation is recorded against the exact PR head in its description and Checks tab.** Branch-protection acceptance and independent provenance verification remain pending. Please do not interpret the README as a claim of production readiness.
 
-The dependency-completeness experiment defines twelve regression jobs: Linux Python 3.10–3.15; Windows and macOS Intel Python 3.10/3.15; macOS ARM64 Python 3.10/3.15. Every job builds and exercises an installed package and runs the full regression gate. Check the [candidate PR and run results](https://github.com/jinxinche/RAEE/pull/13) for the exact validated commit; a workflow definition alone is not passing evidence. This matrix is separate from protected-main acceptance.
+The candidate's [trusted test workflow](.github/workflows/tests.yml) defines twelve regression jobs: Ubuntu Python 3.10–3.15; Windows and macOS Intel Python 3.10/3.15; macOS ARM64 Python 3.10/3.15. It adds Ubuntu 3.11–3.14 and both ARM64 jobs to the historical six-job matrix. Each job is configured to build and exercise an installed package, run the full regression gate and validate the synthetic corpus with `--require-exact`; a final gate requires every matrix job to succeed. Verify the completed run against the candidate's exact head commit in the PR Checks tab. The regression runner centrally maintains total and per-module minima; see [CONTRIBUTING](CONTRIBUTING.md) for commands that use those defaults.
 
 Scoped evidence now fails closed when the bounded Python audit finds omitted local imports or cannot finish confidently. It never certifies dependency closure. See [the dependency audit policy](docs/DEPENDENCY_COMPLETENESS_AUDIT.md) for states and limits, and [CONTRIBUTING](CONTRIBUTING.md) for the reproducible development and package checks.
+
+The current candidate also retains execution-time scope audits, treats dynamic-import aliases as uncertain, includes script sibling imports in the bounded audit, rejects ambiguous JSON, and tightens provider and running-session handling in imported logs. Signing parses and hashes the same captured input bytes; provenance verification uses a private read-only copy of the captured subject. Failed key generation retains partial files for inspection without risking deletion of another writer's replacement. These changes and their verification limits are recorded in the [engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md).
 
 ## Community discussion
 

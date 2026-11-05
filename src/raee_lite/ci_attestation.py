@@ -8,17 +8,17 @@ A valid attestation proves artifact origin/integrity, NOT that its claims are tr
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Mapping
 
 from . import core
 from .attestation import _file as bounded_file
-from .safe_io import write_json
+from .safe_io import strict_json_loads, write_json
 
 REPO = re.compile(r'^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$')
 SHA = re.compile(r'^[0-9a-f]{40}(?:[0-9a-f]{24})?$')
@@ -29,6 +29,8 @@ SCHEMA = 'urn:raee-lite:ci-evidence:v1'
 MAX_MANIFEST = 65_536
 MAX_REPORT = 8_000_000
 MAX_VERIFIER_OUT = 256_000
+STATEMENT_TYPE = 'https://in-toto.io/Statement/v1'
+PREDICATE_TYPE = 'https://slsa.dev/provenance/v1'
 # CVE-2026-64655: older gh versions mishandle regex metacharacters in signer
 # identity checks. Reject those versions before trusting a provenance decision.
 MIN_SAFE_GH = (2, 97, 0)
@@ -68,8 +70,8 @@ def _assert(value: str, pattern: re.Pattern, name: str) -> str:
 def _obj_file(path: Path, max_size: int) -> tuple[dict, bytes]:
     raw = bounded_file(path, max_size)
     try:
-        value = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        value = strict_json_loads(raw)
+    except ValueError as exc:
         raise ValueError('Invalid evidence JSON') from exc
     if not isinstance(value, dict):
         raise ValueError('Evidence JSON must be an object')
@@ -79,6 +81,50 @@ def _obj_file(path: Path, max_size: int) -> tuple[dict, bytes]:
 def _workflow_ref(value: str, repo: str, workflow: str, ref: str) -> None:
     if value != f'{repo}/{workflow}@{ref}':
         raise ValueError('GitHub workflow identity does not match the expected trusted workflow')
+
+
+def _verified_attestation_count(rows: object, manifest_digest: str) -> int:
+    """Validate the policy-relevant subset of gh's documented JSON envelope.
+
+    gh emits objects, not boolean success flags. Every returned row must contain
+    a certificate and a SLSA statement bound to the exact manifest. Do not count
+    arbitrary JSON entries, or silently ignore malformed rows in a mixed result.
+    Identity restrictions are enforced by gh's explicit certificate policy.
+    Predicate contents remain workflow-controlled claims, not identity proof.
+    See https://cli.github.com/manual/gh_attestation_verify and
+    https://github.com/in-toto/attestation/blob/v1.2.0/spec/v1/statement.md.
+    """
+    if not isinstance(rows, list) or not rows:
+        raise ValueError('GitHub verifier did not return a verified attestation')
+    for row in rows:
+        result = row.get('verificationResult') if isinstance(row, dict) else None
+        if not isinstance(result, dict):
+            raise ValueError('Invalid GitHub verification result object')
+        signature = result.get('signature')
+        certificate = signature.get('certificate') if isinstance(signature, dict) else None
+        if not isinstance(certificate, dict) or not certificate:
+            raise ValueError('GitHub verification result is missing its certificate')
+        statement = result.get('statement')
+        if (not isinstance(statement, dict) or statement.get('_type') != STATEMENT_TYPE or
+                statement.get('predicateType') != PREDICATE_TYPE):
+            raise ValueError('Invalid GitHub verification statement or predicate type')
+        # in-toto v1 permits an omitted predicate; when present it is an object.
+        if 'predicate' in statement and not isinstance(statement['predicate'], dict):
+            raise ValueError('Invalid GitHub verification predicate object')
+        subjects = statement.get('subject')
+        if not isinstance(subjects, list) or not subjects:
+            raise ValueError('GitHub verification statement is missing its subjects')
+        matches = False
+        for subject in subjects:
+            # Names are optional and are not artifact identity in in-toto v1.
+            digest = subject.get('digest') if isinstance(subject, dict) else None
+            if (not isinstance(digest, dict) or not digest or
+                    any(not isinstance(value, str) or not value for value in digest.values())):
+                raise ValueError('Invalid GitHub verification subject digest')
+            matches = matches or digest.get('sha256') == manifest_digest
+        if not matches:
+            raise ValueError('GitHub verification subject differs from the exact manifest digest')
+    return len(rows)
 
 
 def export(root: Path, *, expected_repo: str, trusted_ref: str,
@@ -158,6 +204,11 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
 
     No OIDC JWT is accepted as proof, no self-declared fields grant trust, no
     shell and no automatic network downloads. Missing CLI => FAIL CLOSED.
+    Verification uses a private read-only copy of the exact parsed bytes, not
+    the caller's mutable path. The local host and gh installation remain trusted.
+    The signer must be this workflow on this ref/commit at github.com; a reusable
+    workflow at a different ref/commit does not satisfy this export policy.
+    Run ID/attempt and event identity are not independently verified.
     """
     repo = _assert(expected_repo, REPO, 'repository')
     ref = _assert(expected_ref, REF, 'source ref')
@@ -165,7 +216,7 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     workflow = _assert(expected_workflow, WORKFLOW, 'workflow path')
     if timeout <= 0 or timeout > 300:
         raise ValueError('Verifier timeout must be between 1 and 300 seconds')
-    manifest, _ = _obj_file(manifest_path, MAX_MANIFEST)
+    manifest, manifest_raw = _obj_file(manifest_path, MAX_MANIFEST)
     if manifest.get('schema') != SCHEMA:
         raise ValueError('Unsupported CI evidence schema')
     source = manifest.get('source')
@@ -193,12 +244,29 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     if not gh:
         raise ValueError('GitHub CLI (gh) is required for authenticated CI provenance verification')
     require_safe_gh(gh, timeout=min(timeout, 10))
-    args = [gh, 'attestation', 'verify', str(manifest_path),
-            '--repo', repo, '--signer-workflow', f'{repo}/{workflow}',
-            '--source-digest', sha, '--source-ref', ref,
-            '--deny-self-hosted-runners', '--format', 'json']
     try:
-        completed = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+        # gh reopens its input path. Keep its subject identical to the bytes
+        # parsed above even if the caller's file is replaced in the meantime.
+        # TemporaryDirectory is private; this is not isolation from a hostile
+        # process with the verifier's own privileges.
+        with tempfile.TemporaryDirectory(prefix='raee-ci-verify-') as directory:
+            subject = Path(directory) / 'ci-evidence.json'
+            subject.write_bytes(manifest_raw)
+            subject.chmod(0o400)
+            # Even gh 2.97.0's --signer-workflow is a prefix match: a name such
+            # as trusted.yml.evil.yml can match trusted.yml. Exact SAN matching
+            # also binds the workflow ref; source-ref alone only binds the caller
+            # of a reusable workflow. Pin the host instead of inheriting GH_HOST.
+            # https://github.com/cli/cli/blob/v2.97.0/pkg/cmd/attestation/verify/policy.go
+            args = [gh, 'attestation', 'verify', str(subject),
+                    '--hostname', 'github.com', '--repo', repo,
+                    '--cert-identity', f'https://github.com/{repo}/{workflow}@{ref}',
+                    '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
+                    '--signer-digest', sha,
+                    '--source-digest', sha, '--source-ref', ref,
+                    '--predicate-type', PREDICATE_TYPE, '--digest-alg', 'sha256',
+                    '--deny-self-hosted-runners', '--format', 'json']
+            completed = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError('Official GitHub attestation verification unavailable or timed out') from exc
     if completed.returncode != 0:
@@ -207,13 +275,20 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     if len(completed.stdout) > MAX_VERIFIER_OUT:
         raise ValueError('GitHub verification response exceeds limit')
     try:
-        rows = json.loads(completed.stdout)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        rows = strict_json_loads(completed.stdout)
+    except ValueError as exc:
         raise ValueError('Invalid GitHub verification response') from exc
-    if not isinstance(rows, list) or not rows:
-        raise ValueError('GitHub verifier did not return a verified attestation')
+    manifest_digest = hashlib.sha256(manifest_raw).hexdigest()
+    verified_count = _verified_attestation_count(rows, manifest_digest)
     return {'result': 'GITHUB_ATTESTATION_VERIFIED', 'repository': repo, 'commit': sha,
             'ref': ref, 'signer_workflow': f'{repo}/{workflow}',
+            'manifest_sha256': manifest_digest,
             'report_sha256': report['sha256'], 'report_content_checked': report_path is not None,
-            'verified_attestations': len(rows), 'code_correctness_proven': False,
-            'notice': 'Verified CI provenance does not prove test quality, isolation or code correctness.'}
+            'report_outcome': report.get('outcome'),
+            'strict_check_passed': report.get('strict_check_passed'),
+            'require_passed': require_passed,
+            'claimed_run_id': origin['run_id'], 'run_identity_verified': False,
+            'verified_attestations': verified_count, 'code_correctness_proven': False,
+            'notice': 'Verified CI provenance does not prove test quality, isolation or code correctness. '
+                      'Report outcome and strict-check status are signed claims. '
+                      'Run ID/attempt and event identity are not independently verified.'}

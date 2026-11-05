@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import stat
 from pathlib import Path
 from typing import Mapping, Sequence
+from .safe_io import read_bytes
 
 MAX_DECLARED_FILES = 64
 MAX_FILE_BYTES = 2_000_000
@@ -81,29 +80,12 @@ def snapshot(root: Path, paths: Sequence[str],
             if parent.is_symlink():
                 raise ValueError("Declared dependency uses a symlink path")
         try:
-            meta = os.lstat(p)
-            if not stat.S_ISREG(meta.st_mode):
-                raise ValueError("Declared dependency must be a regular file")
-            if meta.st_size > MAX_FILE_BYTES:
-                raise ValueError("Declared dependency file exceeds size bound")
-            total += meta.st_size
+            data = read_bytes(p, min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - total))
+            total += len(data)
             if total > MAX_TOTAL_BYTES:
                 raise ValueError("Declared dependency total exceeds byte budget")
-            # O_NOFOLLOW where available prevents following a swapped final link.
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(p, flags)
-            try:
-                handle_meta = os.fstat(fd)
-                if not stat.S_ISREG(handle_meta.st_mode) or handle_meta.st_size > MAX_FILE_BYTES:
-                    raise ValueError("Declared dependency changed into invalid file")
-                with os.fdopen(fd, "rb", closefd=False) as h:
-                    data = h.read(MAX_FILE_BYTES + 1)
-                if len(data) > MAX_FILE_BYTES:
-                    raise ValueError("Declared dependency exceeds read budget")
-                # Report no raw source contents.
-                records.append([rel, hashlib.sha256(data).hexdigest()])
-            finally:
-                os.close(fd)
+            # Report no raw source contents.
+            records.append([rel, hashlib.sha256(data).hexdigest()])
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as ex:
             raise ValueError("Declared dependency unavailable or unsafe") from ex
     files_digest = _digest(records)
@@ -129,6 +111,16 @@ def compare(before: dict, after: dict, *, check_external: bool = True) -> str:
                 not isinstance(value.get("external_keys"), list) or
                 any(not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key])
                     for key in ("files_sha256", "external_sha256", "binding_sha256"))):
+            return "SCOPE_UNBOUND"
+        try:
+            if _normal_paths(value["paths"]) != value["paths"]:
+                return "SCOPE_UNBOUND"
+        except ValueError:
+            return "SCOPE_UNBOUND"
+        keys = value["external_keys"]
+        if (len(keys) > MAX_EXTERNAL_LABELS or
+                any(not isinstance(key, str) or not _KEY.fullmatch(key) for key in keys) or
+                keys != sorted(set(keys))):
             return "SCOPE_UNBOUND"
         if value["binding_sha256"] != _digest([value["files_sha256"], value["external_sha256"]]):
             return "SCOPE_UNBOUND"

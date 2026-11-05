@@ -1,10 +1,33 @@
 """Policy regression checks on workflows. Not a substitute for live GitHub security review."""
 import unittest
+import contextlib
+import io
+import re
+import textwrap
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 
 class WorkflowPolicy(unittest.TestCase):
+    def test_supplemental_x64_guards_reject_arm64_and_wrong_pointer_width(self):
+        for filename in ('experimental-real-os-matrix.yml', 'experimental-dependency-ablation.yml'):
+            workflow = (ROOT / '.github/workflows' / filename).read_text(encoding='utf-8')
+            match = re.search(r"python - <<'PY'\n(.*?)\n          PY", workflow, re.S)
+            self.assertIsNotNone(match)
+            program = textwrap.dedent(match.group(1)).replace('${{ matrix.python }}', '3.13')
+            for machine, width, accepted in [('x86_64', 8, True), ('AMD64', 8, True),
+                                              ('aarch64', 8, False), ('x86_64', 4, False)]:
+                with self.subTest(workflow=filename, machine=machine, width=width), \
+                        patch('platform.machine', return_value=machine), \
+                        patch('struct.calcsize', return_value=width), \
+                        patch('sys.version_info', (3, 13, 0)), contextlib.redirect_stdout(io.StringIO()):
+                    if accepted:
+                        exec(compile(program, filename, 'exec'), {})
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(program, filename, 'exec'), {})
+
     def test_trusted_issuance_is_main_only(self):
         text=(ROOT/'.github/workflows/trusted-evidence.yml.example').read_text()
         self.assertIn('branches: [main]',text)
@@ -38,13 +61,19 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn('pull_request_target:',s)
         self.assertIn('ubuntu-latest',s)
         self.assertIn('windows-latest',s)
-        self.assertIn('macos-latest',s)
-        self.assertIn('python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules',s)
+        self.assertIn('macos-15-intel',s)
+        self.assertIn('python scripts/run_reviewed_suite.py --require-critical-modules',s)
         self.assertIn("python-version: ['3.10', '3.15']",s)
         self.assertIn('TMPDIR: ${{ runner.temp }}',s)
         self.assertIn('python scripts/local_pr_attack_smoke.py',s)
         self.assertIn("if: matrix.os == 'ubuntu-latest'",s)
         self.assertIn('validate-corpus',s)
+        self.assertIn('--require-exact', s)
+        self.assertIn('--summary test-results/summary.json', s)
+        self.assertIn("branches: [main, 'maintenance/**']", s)
+        for version in ('3.11', '3.12', '3.13', '3.14'):
+            self.assertIn("python-version: '" + version + "'", s)
+        self.assertIn('architecture: arm64', s)
         self.assertNotIn('raee-lite check --ci',s)
 
     def test_full_regression_workflows_install_attestation_extra(self):
@@ -54,6 +83,7 @@ class WorkflowPolicy(unittest.TestCase):
                 text = (ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
                 self.assertIn('".[attest]"', text)
                 self.assertIn('--require-critical-modules', text)
+                self.assertNotIn('--min-tests', text)
 
     def test_dependency_matrix_retains_versions_architectures_and_final_gate(self):
         text = (ROOT / '.github/workflows/experimental-dependency-completeness.yml').read_text(encoding='utf-8')

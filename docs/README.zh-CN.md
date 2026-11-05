@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**公开候选版本现已提供源码：** [v0.10.0rc2 候选分支](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [源码评审 PR #2](https://github.com/jinxinche/RAEE/pull/2)。仓库现已包含 CLI 源码与安装配置；尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。可在隔离环境检查和安装候选源码，尝试 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；未验证需求导致 `status` 返回码 1 是有意设计，非程序崩溃。 默认不会执行项目测试。
+**公开候选版本现已提供源码：** [main 分支源码](https://github.com/jinxinche/RAEE/tree/main) · [已合并的 PR #2](https://github.com/jinxinche/RAEE/pull/2) · [2026-11-05 工程审计与验证状态](ENGINEERING_AUDIT_2026-11-05.md)。仓库现已包含 CLI 源码与安装配置；尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。可在隔离环境检查和安装候选源码，尝试 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；未验证需求导致 `status` 返回码 1 是有意设计，非程序崩溃。 默认不会执行项目测试。
 
 
 ## 为什么需要 RAEE-Lite？
