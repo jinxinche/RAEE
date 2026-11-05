@@ -25,13 +25,15 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install trusted branch code (NOT on PR)
-        run: python -m pip install --no-deps .
+        run: |
+          python -m pip install ".[attest]"
+          python -m pip check
       - name: Execute explicitly approved regression check
         run: |
           raee-lite init
           raee-lite add "Regression suite executes successfully"
           raee-lite expect --for R1 --kind unit
-          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 150
+          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules
           raee-lite report
         env:
           CI: 'true'

@@ -97,9 +97,12 @@ def evaluate(index: Path) -> dict:
         src = _case_file(index, case.get('file'))
         key = (provider, provenance)
         with tempfile.TemporaryDirectory(prefix='raee-corpus-') as d:
+            # Canonicalize only this freshly owned fixture; evidence paths
+            # supplied by a project still retain the strict no-link policy.
+            fixture_root = Path(d).resolve(strict=True)
             try:
-                outcome = import_log(Path(d), src, provider)
-                data = core.read_json(Path(d) / IMPORTS, {'observations': []})
+                outcome = import_log(fixture_root, src, provider)
+                data = core.read_json(fixture_root / IMPORTS, {'observations': []})
                 observed_pairs = [(e.get('check_kind_hint'), e.get('log_exit_code')) for e in data.get('observations', [])]
             except (ValueError, OSError, TypeError, KeyError, RecursionError):
                 totals['parser_errors'] += 1

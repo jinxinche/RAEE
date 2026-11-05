@@ -39,11 +39,35 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn('ubuntu-latest',s)
         self.assertIn('windows-latest',s)
         self.assertIn('macos-latest',s)
-        self.assertIn('python scripts/run_reviewed_suite.py --min-tests 150',s)
+        self.assertIn('python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules',s)
+        self.assertIn("python-version: ['3.10', '3.15']",s)
+        self.assertIn('TMPDIR: ${{ runner.temp }}',s)
         self.assertIn('python scripts/local_pr_attack_smoke.py',s)
         self.assertIn("if: matrix.os == 'ubuntu-latest'",s)
         self.assertIn('validate-corpus',s)
         self.assertNotIn('raee-lite check --ci',s)
+
+    def test_full_regression_workflows_install_attestation_extra(self):
+        for name in ('trusted-evidence.yml', 'trusted-evidence.yml.example', 'tests.yml',
+                     'experimental-dependency-completeness.yml', 'experimental-dependency-ablation.yml'):
+            with self.subTest(workflow=name):
+                text = (ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
+                self.assertIn('".[attest]"', text)
+                self.assertIn('--require-critical-modules', text)
+
+    def test_dependency_matrix_retains_versions_architectures_and_final_gate(self):
+        text = (ROOT / '.github/workflows/experimental-dependency-completeness.yml').read_text(encoding='utf-8')
+        for version in ('3.10', '3.11', '3.12', '3.13', '3.14', '3.15'):
+            self.assertIn("'" + version + "'", text)
+        self.assertIn('architecture: arm64', text)
+        self.assertIn('name: Dependency audit gate', text)
+        self.assertIn('needs: audit', text)
+        self.assertIn('if: always()', text)
+        self.assertIn('test "$MATRIX_RESULT" = success', text)
+        self.assertIn('scripts/smoke_installed_package.py', text)
+        self.assertIn('--summary test-results/summary.json', text)
+        self.assertIn('python -m pip install setuptools==77.0.3', text)
+        self.assertIn('--no-build-isolation', text)
 
     def test_live_candidate_workflows_are_trust_scoped(self):
         # v0.9.1 explicitly enables LIVE-candidate workflows; they still require
