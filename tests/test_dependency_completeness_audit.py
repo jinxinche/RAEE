@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from raee_lite.dependency_audit import audit_local_python_scope
 
@@ -89,6 +90,68 @@ class CompletenessAuditTests(unittest.TestCase):
         self.write("src/pkg/app.py", "import pkg.missing\n")
         result = self.audit(["src/pkg/app.py"])
         self.assertEqual(result["unresolved_project_imports"], ["pkg.missing"])
+
+    def test_package_initializers_and_their_imports_are_dependencies(self):
+        self.write("app.py", "import pkg.nested.helper\n")
+        self.write("pkg/__init__.py", "import configuration\n")
+        self.write("configuration.py", "VALUE = 1\n")
+        self.write("pkg/nested/__init__.py", "")
+        self.write("pkg/nested/helper.py", "VALUE = 1\n")
+        self.assertEqual(self.audit()["missing_local_dependencies"], [
+            "configuration.py", "pkg/__init__.py", "pkg/nested/__init__.py",
+            "pkg/nested/helper.py"])
+        self.assertEqual(self.audit(["pkg/nested/helper.py"])["missing_local_dependencies"], [
+            "configuration.py", "pkg/__init__.py", "pkg/nested/__init__.py"])
+
+    def test_declared_path_through_link_never_reads_external_file(self):
+        with tempfile.TemporaryDirectory() as outside:
+            target = Path(outside).resolve()
+            (target / "entry.py").write_text("import hidden\n", encoding="utf-8")
+            try:
+                (self.root / "linked").symlink_to(target, target_is_directory=True)
+            except OSError:
+                self.skipTest("Symlink privilege unavailable")
+            result = self.audit(["linked/entry.py"])
+            self.assertIn("INPUT_UNAVAILABLE_OR_UNSAFE:linked/entry.py", result["limitations"])
+            self.write("app.py", "import pkg.helper\n")
+            self.write("pkg/helper.py", "VALUE = 1\n")
+            (self.root / "pkg/__init__.py").symlink_to(target / "entry.py")
+            result = self.audit()
+            self.assertIn("pkg/__init__.py", result["missing_local_dependencies"])
+            self.assertIn("INPUT_UNAVAILABLE_OR_UNSAFE:pkg/__init__.py", result["limitations"])
+            self.assertNotIn("hidden", result["unresolved_project_imports"])
+
+    def test_dynamic_import_alias_remains_uncertain(self):
+        self.write("app.py", "from importlib import import_module as load\nload('hidden')\n")
+        self.assertIn("DYNAMIC_EXECUTION_OR_IMPORT:app.py", self.audit()["limitations"])
+
+    def test_relative_import_cannot_escape_source_root(self):
+        self.write("src/pkg/app.py", "from .. import hidden\n")
+        self.write("src/hidden.py", "VALUE = 1\n")
+        result = self.audit(["src/pkg/app.py"])
+        self.assertIn("RELATIVE_IMPORT_UNRESOLVED:src/pkg/app.py", result["limitations"])
+        self.assertNotIn("src/hidden.py", result["missing_local_dependencies"])
+
+    def test_duplicate_imports_do_not_exhaust_visit_budget(self):
+        self.write("app.py", "import helper\nimport helper\n")
+        self.write("helper.py", "pass\n")
+        with patch("raee_lite.dependency_audit.MAX_VISITED", 2):
+            self.assertNotIn("TRAVERSAL_BUDGET_EXCEEDED", self.audit()["limitations"])
+
+    def test_total_read_budget_is_fail_visible(self):
+        self.write("app.py", "import helper\n")
+        self.write("helper.py", "VALUE = 1\n")
+        with patch("raee_lite.dependency_audit.MAX_TOTAL_BYTES", 16):
+            self.assertIn("TOTAL_BYTE_BUDGET_EXCEEDED", self.audit()["limitations"])
+
+    def test_ast_budget_is_fail_visible(self):
+        self.write("app.py", "x = 1\ny = 2\n")
+        with patch("raee_lite.dependency_audit.MAX_AST_NODES", 2):
+            self.assertIn("AST_BUDGET_EXCEEDED", self.audit()["limitations"])
+
+    def test_no_python_entries_is_uncertain(self):
+        self.write("data.json", "{}")
+        self.assertIn("NO_PYTHON_ENTRY_FILES", self.audit(["data.json"])["limitations"])
 
 
 if __name__ == "__main__":

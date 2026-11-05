@@ -11,6 +11,7 @@ from pathlib import Path
 from . import core
 from .evidence_binding import evaluate_binding
 from .dependency_scope import snapshot as scoped_snapshot, compare as compare_scoped
+from .dependency_audit import audit_local_python_scope
 
 KINDS = ("unit", "integration", "e2e", "typecheck", "lint", "build", "smoke", "security")
 
@@ -58,6 +59,7 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
         gaps = []
         evidence_by_kind = []
         for kind in expectations:
+            scope_audit = None
             matches = [r for r in runs if r.get("requirement") == rid and
                        r.get("origin") != "auto_discovered" and r.get("declared_kind") == kind]
             last = matches[-1] if matches else None
@@ -73,7 +75,11 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
                     status = "SCOPE_CONTEXT_REQUIRED"
                 else:
                     binding = last["dependency_scope"]
-                    if not isinstance(binding.get("after"), dict) or (
+                    if not isinstance(binding, dict) or not isinstance(binding.get("before"), dict):
+                        status = "SCOPE_UNBOUND"
+                    elif compare_scoped(binding["before"], binding.get("after")) == "SCOPE_UNBOUND":
+                        status = "SCOPE_UNBOUND"
+                    elif (
                         binding["before"].get("binding_sha256") != binding["after"].get("binding_sha256")
                     ):
                         status = "STALE"
@@ -90,6 +96,15 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
                         if status == "BINDING_MATCHED":
                             status = ("FAILED" if last.get("observed_exit_code") != 0
                                       else "OBSERVED_PASS")
+                    if status == "OBSERVED_PASS":
+                        try:
+                            scope_audit = audit_local_python_scope(root, context["paths"])
+                            if scope_audit["missing_local_dependencies"]:
+                                status = "SCOPE_INCOMPLETE"
+                            elif scope_audit["limitations"] or scope_audit["unresolved_project_imports"]:
+                                status = "SCOPE_AUDIT_UNCERTAIN"
+                        except (OSError, ValueError, TypeError, RecursionError):
+                            status = "SCOPE_AUDIT_UNCERTAIN"
                 if status != "OBSERVED_PASS":
                     gaps.append({"kind": kind, "reason":
                                  "Declared dependency inputs, intent, execution, or destination environment are not currently verified."})
@@ -107,7 +122,11 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
                 gaps.append({"kind": kind, "reason": "The source fingerprint excludes some files."})
             else:
                 status = "OBSERVED_PASS"
-            evidence_by_kind.append({"kind": kind, "state": status, "evidence_id": last.get("id") if last else None})
+            row = {"kind": kind, "state": status, "evidence_id": last.get("id") if last else None,
+                   "binding_kind": "declared_scope" if last and last.get("dependency_scope") is not None else "global"}
+            if scope_audit is not None:
+                row["dependency_audit"] = scope_audit
+            evidence_by_kind.append(row)
         result.append({
             "id": rid,
             "requirement": req["description"],

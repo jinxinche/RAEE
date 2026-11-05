@@ -70,11 +70,13 @@ assess_contracts(
 
 A changed external version returns `EXTERNAL_STATE_CHANGED`. Changed relevant source returns `DEPENDENCY_SOURCE_CHANGED`. Without current scope context, `SCOPE_CONTEXT_REQUIRED` fails closed. Altering the declared set returns `SCOPE_DECLARATION_CHANGED`. Missing, oversized, directory or symlinked input fails conservatively. A failed command is never upgraded to evidence of requirement correctness.
 
+The later dependency-completeness branch adds a negative gate before a scoped `OBSERVED_PASS`: statically visible missing local imports return `SCOPE_INCOMPLETE`; scan limitations or unresolved imports return `SCOPE_AUDIT_UNCERTAIN`. A clean scan does not establish dependency closure. Binding records must contain valid schema/digests on both sides. Trace graphs distinguish declared-input matches from whole-source matches. See [the audit policy](DEPENDENCY_COMPLETENESS_AUDIT.md). These changes do not retroactively revise the historical measurements above.
+
 For ablation **only**, a comparison option `check_external=False` disables external label comparison and represents arm 2. Do **not** treat that mode as a safe way to ignore a dependency that matters to the application.
 
 ## Threat model and unaddressed false negatives
 
-- A malicious or mistaken declaration can omit an actual dependency: an undeclared relevant file can change without invalidating the scoped receipt.
+- A malicious or mistaken declaration can omit an actual dependency. The later static gate catches some local Python omissions, but undetected runtime, data, build or external dependencies can still change without invalidating the scoped receipt.
 - An omitted external revision remains invisible; a declared revision can itself be dishonest or stale.
 - SHA-256 of short nonsecret revision labels is not safe storage for credentials. **Do not supply secrets, tokens or sensitive identifiers.**
 - A global source digest was a conservative approximation, not dependency closure; replacing it with a scoped digest transfers responsibility to the scope author.
@@ -89,7 +91,7 @@ PYTHONPATH=src python -m unittest discover -s tests -p 'test_dependency_scope_ab
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_real_cross_os_protocol.py' -v
 ```
 
-A push to the isolated `experiment/dependency-scoped-ablation` branch triggers six **low-privilege** receipt jobs and a fail-closed aggregate in `experimental-dependency-ablation.yml`. The aggregate requires exactly six distinct runner identities with identical base fixture hashes. It also performs the above regression checks. An aggregate failure means **no ablation results accepted**; do not fill missing receipts with fake OS labels.
+A push to the isolated `experiment/dependency-scoped-ablation` branch triggers six **low-privilege** receipt jobs and a fail-closed aggregate in `experimental-dependency-ablation.yml`. The aggregate requires exactly Linux/Windows/macOS × Python 3.10/3.13 with identical base fixture hashes. It checks schema, environment consistency, exact boolean labels, known status values and the relevant-source safety controls. It also performs the above regression checks. An aggregate failure means **no ablation results accepted**; do not fill missing receipts with fake OS labels. These structural checks do not independently authenticate a receipt's origin.
 
 Prior successfully completed Run #8: https://github.com/jinxinche/RAEE/actions/runs/40972501262. Its artifact cannot be repurposed as proof that these new arms passed. The new result must be tied to its own commit SHA and artifacts.
 

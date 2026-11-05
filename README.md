@@ -125,7 +125,9 @@ The near-term priorities are a reviewed public source release, real GitHub Actio
 
 **Current status: public source under PR review; real cross-platform trusted CI and independent provenance acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
 
-The dependency-completeness experiment now gates the minimum supported Python 3.10 and current stable Python 3.15 on Linux, Windows and macOS Intel. This experimental matrix is separate from protected-main acceptance and does not establish independent provenance or production readiness.
+The dependency-completeness experiment defines twelve regression jobs: Linux Python 3.10–3.15; Windows and macOS Intel Python 3.10/3.15; macOS ARM64 Python 3.10/3.15. Every job builds and exercises an installed package and runs the full regression gate. Check the [candidate PR and run results](https://github.com/jinxinche/RAEE/pull/13) for the exact validated commit; a workflow definition alone is not passing evidence. This matrix is separate from protected-main acceptance.
+
+Scoped evidence now fails closed when the bounded Python audit finds omitted local imports or cannot finish confidently. It never certifies dependency closure. See [the dependency audit policy](docs/DEPENDENCY_COMPLETENESS_AUDIT.md) for states and limits, and [CONTRIBUTING](CONTRIBUTING.md) for the reproducible development and package checks.
 
 ## Contributing and license
 

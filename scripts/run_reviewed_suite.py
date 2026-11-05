@@ -6,18 +6,31 @@ Only run reviewed code on protected branches or disposable credential-free CI.
 """
 from __future__ import annotations
 import argparse
+from collections import Counter
+import json
+import os
+from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
 REQUIRED_TEST_MODULES = {
-    'test_counterevidence',
-    'test_dependency_completeness_audit',
-    'test_dependency_declarations',
-    'test_dependency_scope_ablation',
-    'test_real_cross_os_protocol',
-    'test_security_v05',
-    'test_workflow_policy_v09',
+    'test_counterevidence': 10,
+    'test_dependency_completeness_audit': 19,
+    'test_dependency_declarations': 1,
+    'test_dependency_scope_ablation': 22,
+    'test_real_cross_os_protocol': 11,
+    'test_security_v05': 24,
+    'test_workflow_policy_v09': 7,
+    'test_reviewed_suite': 6,
+}
+
+WINDOWS_CRITICAL_SKIPS = {
+    'test_dependency_scope_ablation.DependencyScopeAblationTests.test_project_symlink_path_not_followed',
+    'test_real_cross_os_protocol.RealMatrixContract.test_macos_style_temp_symlink_is_canonicalized_only_for_owned_fixture',
+    'test_dependency_completeness_audit.CompletenessAuditTests.test_declared_path_through_link_never_reads_external_file',
+    'test_security_v05.SecurityV05.test_symlink_to_ledger_cannot_be_overwritten',
 }
 
 
@@ -31,27 +44,62 @@ def _test_ids(suite):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min-tests', type=int, default=240)
+    parser.add_argument('--min-tests', type=int, default=268)
     parser.add_argument('--start-dir', default='tests')
     parser.add_argument('--require-critical-modules', action='store_true')
+    parser.add_argument('--summary', type=Path, help='Write bounded machine-readable test outcome counts')
     args = parser.parse_args(argv)
     if not 1 <= args.min_tests <= 10_000:
         parser.error('--min-tests must be between 1 and 10000')
-    suite = unittest.TestLoader().discover(args.start_dir)
+    # Canonicalize the parent used for owned temporary test fixtures on macOS.
+    # This does not relax the product's rejection of project-controlled links.
+    tempfile.tempdir = str(Path(tempfile.gettempdir()).resolve(strict=True))
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
+    loader = unittest.TestLoader()
+    suite = loader.discover(args.start_dir)
     count = suite.countTestCases()
+    ids = list(_test_ids(suite))
+    summary = {'schema': 'raee.reviewed_suite.v1', 'discovered': count,
+               'tests_run': 0, 'failures': 0, 'errors': len(loader.errors),
+               'skipped': 0, 'expected_failures': 0, 'unexpected_successes': 0, 'gate_passed': False}
+
+    def finish(code):
+        summary['gate_passed'] = code == 0
+        if args.summary:
+            args.summary.parent.mkdir(parents=True, exist_ok=True)
+            args.summary.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+        return code
+
     print(f'RAEE reviewed suite discovery: {count} tests (minimum: {args.min_tests})', flush=True)
+    if loader.errors:
+        print('FAIL CLOSED: test collection contains import errors.', file=sys.stderr)
+        return finish(2)
     if count < args.min_tests:
         print('FAIL CLOSED: discovered too few tests; review test collection.', file=sys.stderr)
-        return 2
+        return finish(2)
     if args.require_critical_modules:
-        modules = {test_id.split('.', 1)[0] for test_id in _test_ids(suite)}
-        missing = sorted(REQUIRED_TEST_MODULES - modules)
+        modules = Counter(test_id.split('.', 1)[0] for test_id in ids)
+        missing = sorted(name for name, minimum in REQUIRED_TEST_MODULES.items() if modules[name] < minimum)
         if missing:
-            print('FAIL CLOSED: critical regression modules missing: ' + ', '.join(missing),
+            print('FAIL CLOSED: critical regression modules missing or reduced: ' + ', '.join(missing),
                   file=sys.stderr)
-            return 2
+            return finish(2)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    return 0 if result.wasSuccessful() else 1
+    summary.update(tests_run=result.testsRun, failures=len(result.failures), errors=len(result.errors),
+                   skipped=len(result.skipped), expected_failures=len(result.expectedFailures),
+                   unexpected_successes=len(result.unexpectedSuccesses))
+    if args.require_critical_modules:
+        allowed = WINDOWS_CRITICAL_SKIPS if os.name == 'nt' else set()
+        unverified = [test.id() for test, _ in result.skipped
+                      if test.id().split('.', 1)[0] in REQUIRED_TEST_MODULES and test.id() not in allowed]
+        unverified.extend(test.id() for test, _ in result.expectedFailures
+                          if test.id().split('.', 1)[0] in REQUIRED_TEST_MODULES)
+        if unverified:
+            print('FAIL CLOSED: critical tests did not pass: ' + ', '.join(unverified), file=sys.stderr)
+            return finish(1)
+    return finish(0 if result.wasSuccessful() else 1)
 
 
 if __name__ == '__main__':

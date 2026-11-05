@@ -13,6 +13,7 @@ from raee_lite.core import init, add_requirement, run_check, fingerprint, get_ma
 from raee_lite.contracts import set_expectation, assess_contracts
 from raee_lite.dependency_scope import snapshot, compare
 from raee_lite.evidence_binding import current_environment
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -119,6 +120,53 @@ class DependencyScopeAblationTests(unittest.TestCase):
     def test_excluded_external_label_can_miss_change(self):
         # No direct OS environment scanning is a privacy property AND a limit.
         self.assertEqual(self.status(), "OBSERVED_PASS")
+
+    def record_source(self, source):
+        (self.root / "app.py").write_text(source, encoding="utf-8")
+        run_check(self.root, self.rid, [sys.executable, "-c", "pass"], 15, kind="unit",
+                  dependency_files=["app.py", "test_app.py"], external_revisions=self.rev)
+
+    def test_visible_omission_blocks_scoped_pass(self):
+        (self.root / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self.record_source("import helper\n")
+        self.assertEqual(self.status(), "SCOPE_INCOMPLETE")
+
+    def test_dynamic_import_blocks_scoped_pass(self):
+        self.record_source("__import__('hidden')\n")
+        self.assertEqual(self.status(), "SCOPE_AUDIT_UNCERTAIN")
+
+    def test_audit_budget_exhaustion_blocks_scoped_pass(self):
+        with patch("raee_lite.dependency_audit.MAX_VISITED", 1):
+            self.assertEqual(self.status(), "SCOPE_AUDIT_UNCERTAIN")
+
+    def test_failed_execution_remains_failed_with_incomplete_scope(self):
+        (self.root / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self.record_source("import helper\n")
+        run_check(self.root, self.rid, [sys.executable, "-c", "raise SystemExit(1)"], 15,
+                  kind="unit", dependency_files=["app.py", "test_app.py"], external_revisions=self.rev)
+        self.assertEqual(self.status(), "FAILED")
+
+    def test_incomplete_scope_records_cannot_match_each_other(self):
+        for malformed in ({}, {"schema": "raee.declared_dependency_scope.v1"}, None):
+            with self.subTest(value=malformed):
+                self.assertEqual(compare(malformed, malformed), "SCOPE_UNBOUND")
+
+    def test_invalid_after_binding_revokes(self):
+        before = snapshot(self.root, ["app.py"])
+        after = dict(before, binding_sha256="0" * 64)
+        self.assertEqual(compare(before, after), "SCOPE_UNBOUND")
+
+    def test_scoped_trace_does_not_claim_global_fingerprint_match(self):
+        from raee_lite.obligation_trace import trace
+        (self.root / "NOTE.txt").write_text("unrelated", encoding="utf-8")
+        source = fingerprint(self.root)
+        contracts = assess_contracts(self.root, source, dependency_context={
+            self.rid: {"paths": ["app.py", "test_app.py"], "external_revisions": self.rev}})
+        graph = trace({"requirements": [{"id": self.rid, "requirement": "Signup rejects invalid email",
+                                         "state": "STALE"}], "source": source, "evidence_contracts": contracts})
+        relations = {edge["relation"] for edge in graph["requirements"][0]["edges"]}
+        self.assertIn("DECLARED_INPUTS_MATCH_CURRENT", relations)
+        self.assertNotIn("SOURCE_FINGERPRINT_MATCHES_CURRENT", relations)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,46 @@
 """Aggregate six independently executed real runner receipts; no synthetic OS labels."""
 import argparse
 import json
+import re
 from pathlib import Path
 
-from raee_lite.evidence_binding import evaluate_binding
+from raee_lite.evidence_binding import evaluate_binding, intent_digest
+
+EXPECTED_IDENTITIES = {(os_name, version) for os_name in ("linux", "win32", "darwin")
+                       for version in ("3.10", "3.13")}
+OBSERVED_STATES = {"OBSERVED_PASS", "STALE", "FAILED_CHECK", "PARTIAL_COVERAGE", "UNTESTED",
+                   "FAILED", "DEPENDENCY_SOURCE_CHANGED", "EXTERNAL_STATE_CHANGED",
+                   "SCOPE_CONTEXT_REQUIRED", "SCOPE_DECLARATION_CHANGED", "SCOPE_INPUT_UNAVAILABLE",
+                   "SCOPE_UNBOUND", "SCOPE_INCOMPLETE", "SCOPE_AUDIT_UNCERTAIN",
+                   "INTENT_CHANGED", "ENVIRONMENT_SHIFT_UNVERIFIED"}
+
+
+def _validate_receipt(row):
+    if not isinstance(row, dict) or row.get("schema") != "raee.real_runner_receipt.v1":
+        raise ValueError("Invalid runner receipt schema")
+    version = row.get("python")
+    if not isinstance(version, str) or not re.fullmatch(r"3\.\d+\.\d+", version):
+        raise ValueError("Invalid Python identity")
+    environment = row.get("environment")
+    if (not isinstance(environment, dict) or environment.get("python") != version or
+            not isinstance(environment.get("os"), str) or not environment["os"] or
+            row.get("receipt_environment") != environment):
+        raise ValueError("Inconsistent runner and receipt environment")
+    if (row.get("same_runner_state") != "OBSERVED_PASS" or row.get("intent_digest_present") is not True or
+            type(row.get("observed_exit_code")) is not int or row["observed_exit_code"] != 0 or
+            row.get("requirement_digest") != intent_digest("Signup rejects invalid addresses")):
+        raise ValueError("Unusable source receipt in matrix")
+    if not isinstance(row.get("receipt_source_fingerprint"), str) or not row["receipt_source_fingerprint"]:
+        raise ValueError("Missing source fingerprint")
+    for key, expected in (("hard_negative_harmless_tracked_change", False),
+                          ("hard_positive_untracked_external_revision", True)):
+        case = row.get(key)
+        if (not isinstance(case, dict) or case.get("ground_truth_revoke") is not expected or
+                case.get("observed_state") not in OBSERVED_STATES or
+                type(case.get("predicted_revoke")) is not bool or
+                case["predicted_revoke"] != (case["observed_state"] != "OBSERVED_PASS")):
+            raise ValueError("Invalid control label or outcome")
+    return row["platform"], ".".join(version.split(".")[:2])
 
 def ratio(n, d):
     return n / d if d else None
@@ -13,12 +50,11 @@ def summarize(root: Path) -> dict:
     if len(paths) != 6:
         raise ValueError(f"Required exactly six real runner receipts, found {len(paths)}")
     rows = [json.loads(p.read_text(encoding="utf-8")) for p in paths]
-    identities = {(r["platform"], r["python"]) for r in rows}
+    identities = {_validate_receipt(r) for r in rows}
     if len(identities) != 6:
         raise ValueError("Duplicate OS/Python identities: expected 3 OS x 2 Python versions")
-    if any(r.get("same_runner_state") != "OBSERVED_PASS" or not r.get("intent_digest_present")
-           or r.get("observed_exit_code") != 0 for r in rows):
-        raise ValueError("Unusable source receipt in matrix")
+    if identities != EXPECTED_IDENTITIES:
+        raise ValueError("Runner identities do not match the expected 3 OS x Python 3.10/3.13 matrix")
     if len({r["receipt_source_fingerprint"] for r in rows}) != 1:
         raise ValueError("Different source snapshots; cannot attribute environment transfer")
     checks = []
@@ -61,8 +97,10 @@ def summarize(root: Path) -> dict:
                 case = witness.get(case_name)
                 if not isinstance(case, dict) or mode not in case or type(case.get("ground_truth_revoke")) is not bool:
                     raise ValueError("Missing case outcome in a real-runner ablation receipt")
+                if case["ground_truth_revoke"] != (case_name != "irrelevant_note_change"):
+                    raise ValueError("Unexpected ground truth for controlled intervention")
                 status = case[mode]
-                if not isinstance(status, str):
+                if not isinstance(status, str) or status not in OBSERVED_STATES:
                     raise ValueError("Invalid scoped ablation status")
                 entry = {"source": row["platform"] + "/" + row["python"],
                          "target": case_name, "state": status, "policy": mode,

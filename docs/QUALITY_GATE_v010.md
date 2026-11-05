@@ -6,11 +6,11 @@ This is a **local engineering gate**, not an exhaustive security proof or a prom
 
 | Area | Gate | Evidence to retain | Current RC status |
 |---|---|---|---|
-| Real trusted GitHub CI | Protected main, independent reviewer, required checks | Repo ruleset/branch protection + run URLs | **NOT VERIFIED** (no public RAEE-Lite repo) |
+| Real trusted GitHub CI | Protected main, independent reviewer, required checks | Repo ruleset/branch protection + run URLs | **NOT VERIFIED** (public candidate PRs; reviewed main integration pending) |
 | GitHub origin proof | Real GitHub `actions/attest` on trusted workflow | Original artifact, verified bundle, run ID, signer workflow, full SHA | **NOT VERIFIED** |
 | External verification | `gh attestation verify` with independently pinned expected identity | Clean environment, verifier version, output summary | **NOT VERIFIED** |
 | Fork PR privilege boundary | Malicious fork attempts at workflow/symlink/CI artifacts, without secrets | Real failed/denied job URLs | **NOT VERIFIED** (local tests only) |
-| Cross-platform testing | Linux/Windows/macOS, supported Python versions | Hosted CI matrix run URLs | **NOT VERIFIED** (local Linux only) |
+| Cross-platform testing | Linux/Windows/macOS, supported Python versions | Hosted CI matrix run URLs | Experimental baseline: [six jobs passed](https://github.com/jinxinche/RAEE/actions/runs/41235479143); expanded candidate matrix and protected-main acceptance require their own runs |
 | Real agent log compatibility | Consent, versioned schema fixtures, blinded labels | Count of real sessions, success/fail/unknown, confidence intervals | **NOT VERIFIED** (synthetic fixtures only) |
 | Real association accuracy | Independent labelling and held-out test set | TP/FP/FN/TN, Precision/Recall/FPR with CI | **NOT VERIFIED** (synthetic small sample only) |
 | Isolated execution | Rootless/ephemeral Docker integration and negative tests | Actual Docker daemon results | **NOT VERIFIED** |
@@ -20,7 +20,9 @@ This is a **local engineering gate**, not an exhaustive security proof or a prom
 
 - Source tree is distributable as a Python package; test via a new virtual environment.
 - Read-only `preflight` provides local heuristic CI configuration findings; it does not run scripts.
-- Trusted-main test workflow refuses fewer than 240 discovered tests and passes `--require-critical-modules` to require the counterevidence, dependency, cross-OS, security and workflow-policy modules.
+- Full-suite workflows refuse fewer than 268 discovered tests and use `--require-critical-modules` to enforce per-module minima for counterevidence, dependency, cross-OS, security, workflow policy and the gate's own negative controls. Collection errors, critical skips and critical expected failures fail the gate. Only four named symlink-privilege skips are allowed on Windows; their coverage must remain on POSIX runners.
+- Experimental matrix summaries record discovered/executed/skipped/failed counts. A stable final check requires all matrix jobs to succeed; it can become a required check after reviewed integration. Counts and module minima cannot prove test quality or resist a malicious reviewer changing both tests and policy.
+- Clean core-wheel installs are exercised outside the checkout without `cryptography`; full regression/signing collection installs the `attest` extra and runs `pip check`. The SPDX license metadata requires `setuptools>=77.0.3`, and the experiment checks this minimum build backend on Python 3.10.
 - High-impact PR file guard also routes `.gitmodules`, `.gitattributes`, and `pyproject.toml` changes to review.
 - `preflight` and the minimum-test runner have dedicated negative tests.
 - No claims of live branch protection or GitHub OIDC trust arise from local mocks.
