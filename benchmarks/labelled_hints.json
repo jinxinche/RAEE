@@ -1,0 +1,218 @@
+[
+  {
+    "requirement": "Login e2e works",
+    "expected_kinds": [
+      "e2e"
+    ],
+    "observed_kind": "e2e",
+    "relevant": true,
+    "observed_target": "login"
+  },
+  {
+    "requirement": "Login e2e works",
+    "expected_kinds": [
+      "e2e"
+    ],
+    "observed_kind": "unit",
+    "relevant": false,
+    "observed_target": "login"
+  },
+  {
+    "requirement": "Checkout integration works",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "integration",
+    "relevant": true,
+    "observed_target": "checkout"
+  },
+  {
+    "requirement": "Checkout integration works",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "integration",
+    "relevant": false,
+    "observed_target": "checkout"
+  },
+  {
+    "requirement": "Only CSS changed",
+    "expected_kinds": [
+      "build"
+    ],
+    "observed_kind": "build",
+    "relevant": true,
+    "observed_target": "css"
+  },
+  {
+    "requirement": "Only CSS changed",
+    "expected_kinds": [
+      "build"
+    ],
+    "observed_kind": "build",
+    "relevant": false,
+    "observed_target": "deploy"
+  },
+  {
+    "requirement": "Data migrations correct",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "unit",
+    "relevant": true,
+    "observed_target": "migration"
+  },
+  {
+    "requirement": "OAuth callback works",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "integration",
+    "relevant": true,
+    "observed_target": "oauth"
+  },
+  {
+    "requirement": "OAuth callback works",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "lint",
+    "relevant": false,
+    "observed_target": "oauth"
+  },
+  {
+    "requirement": "Python unit tests pass",
+    "expected_kinds": [
+      "unit"
+    ],
+    "observed_kind": "unit",
+    "relevant": true,
+    "observed_target": "lint"
+  },
+  {
+    "requirement": "Python unit tests pass",
+    "expected_kinds": [
+      "unit"
+    ],
+    "observed_kind": "unit",
+    "relevant": false,
+    "observed_target": "search"
+  },
+  {
+    "requirement": "Docker start works",
+    "expected_kinds": [
+      "smoke"
+    ],
+    "observed_kind": "smoke",
+    "relevant": true,
+    "observed_target": "docker"
+  },
+  {
+    "requirement": "Docker start works",
+    "expected_kinds": [
+      "smoke"
+    ],
+    "observed_kind": "build",
+    "relevant": false,
+    "observed_target": "docker"
+  },
+  {
+    "requirement": "Security controls work",
+    "expected_kinds": [
+      "security"
+    ],
+    "observed_kind": "security",
+    "relevant": true,
+    "observed_target": "security"
+  },
+  {
+    "requirement": "Security controls work",
+    "expected_kinds": [
+      "security"
+    ],
+    "observed_kind": "security",
+    "relevant": false,
+    "observed_target": "secret"
+  },
+  {
+    "requirement": "UI checkout works",
+    "expected_kinds": [
+      "e2e"
+    ],
+    "observed_kind": "e2e",
+    "relevant": true,
+    "observed_target": "checkout"
+  },
+  {
+    "requirement": "UI checkout works",
+    "expected_kinds": [
+      "e2e"
+    ],
+    "observed_kind": "e2e",
+    "relevant": false,
+    "observed_target": "checkout"
+  },
+  {
+    "requirement": "Application lints",
+    "expected_kinds": [
+      "lint"
+    ],
+    "observed_kind": "lint",
+    "relevant": true,
+    "observed_target": "lint"
+  },
+  {
+    "requirement": "Application lints",
+    "expected_kinds": [
+      "lint"
+    ],
+    "observed_kind": "typecheck",
+    "relevant": false,
+    "observed_target": "typecheck"
+  },
+  {
+    "requirement": "E2E checkout covers API",
+    "expected_kinds": [
+      "e2e"
+    ],
+    "observed_kind": "integration",
+    "relevant": true,
+    "observed_target": "checkout"
+  },
+  {
+    "requirement": "Mypy typecheck passes",
+    "expected_kinds": [
+      "typecheck"
+    ],
+    "observed_kind": "typecheck",
+    "relevant": true,
+    "observed_target": "typecheck"
+  },
+  {
+    "requirement": "No insecure dependencies",
+    "expected_kinds": [
+      "security"
+    ],
+    "observed_kind": "unit",
+    "relevant": false,
+    "observed_target": "security"
+  },
+  {
+    "requirement": "Data migrations work",
+    "expected_kinds": [
+      "integration"
+    ],
+    "observed_kind": "integration",
+    "relevant": true,
+    "observed_target": "migration"
+  },
+  {
+    "requirement": "Working on unrelated files",
+    "expected_kinds": [
+      "unit"
+    ],
+    "observed_kind": "unit",
+    "relevant": false,
+    "observed_target": "cache"
+  }
+]

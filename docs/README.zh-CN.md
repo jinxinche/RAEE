@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**公开候选版本现已提供源码：** [v0.10.0rc2 候选分支](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [源码评审 PR #2](https://github.com/jinxinche/RAEE/pull/2)。源码目前还未合入默认 `main`；尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。可在隔离环境检查和安装候选源码，尝试 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；未验证需求导致 `status` 返回码 1 是有意设计，非程序崩溃。
+**公开候选版本现已提供源码：** [v0.10.0rc2 候选分支](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [源码评审 PR #2](https://github.com/jinxinche/RAEE/pull/2)。仓库现已包含 CLI 源码与安装配置；尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。可在隔离环境检查和安装候选源码，尝试 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；未验证需求导致 `status` 返回码 1 是有意设计，非程序崩溃。 默认不会执行项目测试。
 
 
 ## 为什么需要 RAEE-Lite？
@@ -29,7 +29,7 @@ Agent 历史日志只作为**未经独立验证的会话证据**；本地实际�
 
 ## 最简使用方式
 
-**发布状态提示：** 本仓库刚刚建立，当前正在准备首次公开源码发布；CLI 源码和安装包尚未上传到此仓库。以下命令展示开发候选版本的使用方式，并非当前可以直接从本仓库安装的承诺。
+**发布状态提示：** 可从本仓库经过审查的源码安装候选版本。稳定版、PyPI 发布、受保护主分支验收和独立来源验证仍是单独的发布门槛。
 
 在已安装经过审查的本地开发版本后：
 
@@ -47,7 +47,7 @@ raee-lite check       # 生成证据缺口报告
 - 退出码为 0 仅说明对应命令完成，不代表需求、测试质量或安全性得到证明。
 - Docker 隔离不等同于经过安全认证的虚拟机沙盒。
 - 证据签名可以帮助验证来源和完整性，但不能证明测试结论真实充分。
-- 真实用户日志兼容率、GitHub 云端签名、三系统 CI 和独立安全审计仍需在正式发布前完成验证。
+- 跨平台回归记录见 [PR #13](https://github.com/jinxinche/RAEE/pull/13)；真实用户日志兼容率、独立来源验证和安全审计仍需另行验证。
 
 ## 研究来源与预印本引用
 

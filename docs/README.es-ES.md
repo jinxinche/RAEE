@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**Código candidato disponible públicamente:** [rama v0.10.0rc2](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [PR #2](https://github.com/jinxinche/RAEE/pull/2). El código todavía **no está integrado en `main`**. No se afirma una versión estable, publicación en PyPI ni certificación independiente de procedencia. En un entorno aislado, prueba `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` y `raee-lite status`. Resultado: `UNTESTED`; el estado 1 indica una carencia de evidencias, no un fallo del programa.
+**Código candidato disponible públicamente:** [rama v0.10.0rc2](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [PR #2](https://github.com/jinxinche/RAEE/pull/2). Este repositorio incluye el código de la CLI y su configuración de instalación. No se afirma una versión estable, publicación en PyPI ni certificación independiente de procedencia. En un entorno aislado, prueba `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` y `raee-lite status`. Resultado: `UNTESTED`; el estado 1 indica una carencia de evidencias, no un fallo del programa. Por defecto no se ejecutan pruebas del proyecto.
 
 
 ## ¿Por qué RAEE-Lite?
@@ -29,7 +29,7 @@ Los registros del agente son **evidencia histórica no verificada de forma indep
 
 ## Primeros pasos
 
-**Estado de publicación:** Este repositorio público está preparando su primera publicación de código. El código fuente de la CLI y su paquete instalable **todavía no se han publicado aquí**. Los siguientes comandos describen el uso de la versión candidata local; no implican que ya se pueda instalar desde este repositorio.
+**Estado de publicación:** La versión candidata se puede instalar desde una copia revisada de este repositorio. Una versión estable, la publicación en PyPI y la verificación independiente de procedencia siguen siendo pasos separados.
 
 Tras instalar una versión candidata local previamente revisada:
 
@@ -47,7 +47,7 @@ Por defecto, la herramienta no ejecuta scripts del proyecto. La ejecución es op
 - Un código de salida 0 no demuestra que todos los requisitos estén cubiertos.
 - El aislamiento mediante Docker no equivale a una máquina virtual reforzada ni a una auditoría externa.
 - Una firma digital puede acreditar la procedencia de una declaración, pero no su suficiencia o corrección.
-- Todavía faltan pruebas con registros reales autorizados, resultados de CI en varias plataformas, certificaciones reales de GitHub y una revisión de seguridad independiente.
+- Los resultados de regresión en varias plataformas están documentados en el [PR #13](https://github.com/jinxinche/RAEE/pull/13). Siguen pendientes las pruebas con registros reales autorizados y las verificaciones independientes de procedencia y seguridad.
 
 ## Origen científico y referencia del preprint
 

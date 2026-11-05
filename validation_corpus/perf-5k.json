@@ -1,0 +1,11 @@
+{
+  "provenance": "SYNTHETIC",
+  "events": 5000,
+  "input_bytes": 745000,
+  "seconds": 1.142,
+  "tracemalloc_peak_mb": 10.31,
+  "parsed_observations": 5000,
+  "platform": "Linux",
+  "python": "3.13.5",
+  "warning": "Python tracemalloc peak is not total RSS; do not extrapolate to real sessions."
+}

@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**Öffentlicher Quellcode-Kandidat:** [v0.10.0rc2 Branch](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [Review-PR #2](https://github.com/jinxinche/RAEE/pull/2). Der Code befindet sich noch **nicht** im Standardbranch `main`. Keine stabile Veröffentlichung, keine PyPI-Publikation und keine unabhängig verifizierte Cloud-Attestierung. In einer isolierten Umgebung können Sie `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` und `raee-lite status` ausprobieren. Erwartet: `UNTESTED`. Rückgabecode 1 von `status` meldet die Evidenzlücke und ist kein Absturz.
+**Öffentlicher Quellcode-Kandidat:** [v0.10.0rc2 Branch](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [Review-PR #2](https://github.com/jinxinche/RAEE/pull/2). Dieses Repository enthält den CLI-Quellcode und die Installationskonfiguration. Keine stabile Veröffentlichung, keine PyPI-Publikation und keine unabhängig verifizierte Cloud-Attestierung. In einer isolierten Umgebung können Sie `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` und `raee-lite status` ausprobieren. Erwartet: `UNTESTED`. Rückgabecode 1 von `status` meldet die Evidenzlücke und ist kein Absturz. Standardmäßig werden keine Projekttests ausgeführt.
 
 
 ## Wozu RAEE-Lite?
@@ -29,7 +29,7 @@ Historische Agent-Protokolle gelten grundsätzlich als **nicht unabhängig verif
 
 ## Einstieg
 
-**Veröffentlichungsstand:** Dieses öffentliche Repository bereitet die erste Quellcode-Veröffentlichung vor. CLI-Quellcode und Installationspaket sind **hier noch nicht veröffentlicht**. Die folgenden Befehle beschreiben den lokalen Entwicklungskandidaten, nicht eine bereits verfügbare Installation aus diesem Repository.
+**Veröffentlichungsstand:** Der Kandidat kann aus einem zuvor geprüften Checkout dieses Repositorys installiert werden. Eine stabile Veröffentlichung, PyPI-Publikation und unabhängige Herkunftsprüfung bleiben separate Freigabeschritte.
 
 Nach Installation eines zuvor geprüften lokalen Kandidaten:
 
@@ -47,7 +47,7 @@ Standardmäßig werden keine projektspezifischen Skripte ausgeführt. Die Ausfü
 - Ein Exit-Code von 0 belegt nicht die Erfüllung sämtlicher Anforderungen.
 - Docker-Isolation ersetzt keine unabhängig geprüfte Sicherheits-Sandbox.
 - Eine digitale Signatur kann die Herkunft eines Nachweises bestätigen, nicht dessen fachliche Aussagekraft.
-- Reale Formatkompatibilität, GitHub-Attestierungen, plattformübergreifende CI-Läufe und unabhängige Sicherheitsprüfungen sind noch offen.
+- Plattformübergreifende Regressionsergebnisse sind in [PR #13](https://github.com/jinxinche/RAEE/pull/13) dokumentiert. Reale Formatkompatibilität, unabhängige Herkunfts- und Sicherheitsprüfungen bleiben offen.
 
 ## Wissenschaftlicher Ursprung und Zitierung
 

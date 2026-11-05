@@ -1,0 +1,78 @@
+{
+  "schema": "raee-corpus-v1",
+  "description": "SYNTHETIC parser compatibility fixtures ONLY; no real user logs",
+  "cases": [
+    {
+      "id": "claude_success",
+      "file": "claude_success.jsonl",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "unit",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "claude_missing_exit",
+      "file": "claude_missing_exit.jsonl",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "build",
+          "exit_code": null
+        }
+      ]
+    },
+    {
+      "id": "claude_failed",
+      "file": "claude_failed.jsonl",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "e2e",
+          "exit_code": 2
+        }
+      ]
+    },
+    {
+      "id": "codex_legacy",
+      "file": "codex_legacy.jsonl",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "unit",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "codex_modern",
+      "file": "codex_modern.jsonl",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "build",
+          "exit_code": 1
+        }
+      ]
+    },
+    {
+      "id": "codex_exec_jsonl",
+      "file": "codex_exec_jsonl.jsonl",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "expected": [
+        {
+          "kind": "lint",
+          "exit_code": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "schema": "raee-validation-summary-v1",
+  "aggregate": {
+    "exact_sessions": 6,
+    "parsed_sessions": 6,
+    "expected_events": 6,
+    "parsed_events": 6,
+    "tp": 6,
+    "fp": 0,
+    "fn": 0,
+    "unknown_exit_events": 1,
+    "malformed_lines": 0,
+    "oversize_lines": 0,
+    "unmatched_calls": 0,
+    "cases": 6,
+    "session_exact_match_rate": 1.0,
+    "event_precision": 1.0,
+    "event_recall": 1.0,
+    "false_discovery_rate": 0.0,
+    "unknown_exit_rate": 0.1667
+  },
+  "by_provider": {
+    "claude": {
+      "exact_sessions": 3,
+      "parsed_sessions": 3,
+      "expected_events": 3,
+      "parsed_events": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "unknown_exit_events": 1,
+      "malformed_lines": 0,
+      "oversize_lines": 0,
+      "unmatched_calls": 0,
+      "cases": 3,
+      "session_exact_match_rate": 1.0,
+      "event_precision": 1.0,
+      "event_recall": 1.0,
+      "false_discovery_rate": 0.0,
+      "unknown_exit_rate": 0.3333
+    },
+    "codex": {
+      "exact_sessions": 3,
+      "parsed_sessions": 3,
+      "expected_events": 3,
+      "parsed_events": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "unknown_exit_events": 0,
+      "malformed_lines": 0,
+      "oversize_lines": 0,
+      "unmatched_calls": 0,
+      "cases": 3,
+      "session_exact_match_rate": 1.0,
+      "event_precision": 1.0,
+      "event_recall": 1.0,
+      "false_discovery_rate": 0.0,
+      "unknown_exit_rate": 0.0
+    }
+  },
+  "by_provenance": {
+    "synthetic": {
+      "exact_sessions": 6,
+      "parsed_sessions": 6,
+      "expected_events": 6,
+      "parsed_events": 6,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "unknown_exit_events": 1,
+      "malformed_lines": 0,
+      "oversize_lines": 0,
+      "unmatched_calls": 0,
+      "cases": 6,
+      "session_exact_match_rate": 1.0,
+      "event_precision": 1.0,
+      "event_recall": 1.0,
+      "false_discovery_rate": 0.0,
+      "unknown_exit_rate": 0.1667
+    }
+  },
+  "case_diagnostics": [
+    {
+      "id": "claude_success",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    },
+    {
+      "id": "claude_missing_exit",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    },
+    {
+      "id": "claude_failed",
+      "provider": "claude",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    },
+    {
+      "id": "codex_legacy",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    },
+    {
+      "id": "codex_modern",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    },
+    {
+      "id": "codex_exec_jsonl",
+      "provider": "codex",
+      "provenance": "synthetic",
+      "status": "EXACT",
+      "expected_count": 1,
+      "observed_count": 1,
+      "matched": 1,
+      "extra": 0,
+      "missed": 0
+    }
+  ],
+  "has_consent_based_real_logs": false,
+  "note": "Synthetic/documentation fixtures never establish field performance. This parser benchmark does not verify software tests. No raw transcripts or commands are included."
+}
