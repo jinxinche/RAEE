@@ -128,6 +128,13 @@ class LinkedReceiptTests(ReportFixture):
         self.assertEqual(enhanced.audit(self.root)['agent_evidence']['explicit'][1]['state'], 'INTENT_CHANGED')
         manifest['requirements'].pop(0)
         core.write_json(self.root / core.MANIFEST, manifest)
+        # Removing a requirement leaves its old attribution dangling. Preserve
+        # that error boundary, then examine the still-valid cross-requirement link.
+        with self.assertRaisesRegex(ValueError, 'dangling requirement'):
+            self.state()
+        links = core.read_json(self.root / '.raee/links.json')
+        links['links'] = [link for link in links['links'] if link['requirement'] == other]
+        core.write_json(self.root / '.raee/links.json', links)
         self.assertEqual(self.state(), 'INTENT_UNBOUND')
 
     def test_automatic_receipt_checks_environment_without_inventing_intent(self):

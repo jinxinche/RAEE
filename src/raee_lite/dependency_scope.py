@@ -112,6 +112,16 @@ def compare(before: dict, after: dict, *, check_external: bool = True) -> str:
                 any(not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key])
                     for key in ("files_sha256", "external_sha256", "binding_sha256"))):
             return "SCOPE_UNBOUND"
+        try:
+            if _normal_paths(value["paths"]) != value["paths"]:
+                return "SCOPE_UNBOUND"
+        except ValueError:
+            return "SCOPE_UNBOUND"
+        keys = value["external_keys"]
+        if (len(keys) > MAX_EXTERNAL_LABELS or
+                any(not isinstance(key, str) or not _KEY.fullmatch(key) for key in keys) or
+                keys != sorted(set(keys))):
+            return "SCOPE_UNBOUND"
         if value["binding_sha256"] != _digest([value["files_sha256"], value["external_sha256"]]):
             return "SCOPE_UNBOUND"
     if before.get("paths") != after.get("paths") or before.get("external_keys") != after.get("external_keys"):

@@ -67,6 +67,10 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and SHA_RE.fullmatch(value) is not None
+
+
 def _canonical(obj: dict) -> bytes:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
 
@@ -189,6 +193,22 @@ def _valid_snapshot(root: Path, report: dict, *, allow_partial: bool) -> dict:
     return actual
 
 
+def _valid_isolated_receipt(receipt: object) -> bool:
+    # Use the same claim schema when selecting ledger rows and when verifying
+    # an offline statement: a nonempty list alone is not an execution receipt.
+    if not isinstance(receipt, dict):
+        return False
+    image_id = receipt.get('image_id')
+    excluded = receipt.get('snapshot_excluded_total')
+    return (isinstance(receipt.get('id'), str) and bool(receipt['id'])
+            and receipt.get('origin') == 'isolated_replay'
+            and receipt.get('status') == 'pass'
+            and _is_sha256(receipt.get('snapshot_sha256'))
+            and isinstance(image_id, str) and image_id.startswith('sha256:')
+            and _is_sha256(image_id[7:])
+            and type(excluded) is int and excluded >= 0)
+
+
 def _verify_ledger_references(report: dict, ledger: dict, source_sha256: str) -> list[dict]:
     # Keep a bounded, explicit summary; these are locally recorded *assertions*.
     rows = ledger.get('runs')
@@ -200,18 +220,24 @@ def _verify_ledger_references(report: dict, ledger: dict, source_sha256: str) ->
         if not isinstance(run, dict) or not isinstance(run.get('id'), str) or run['id'] in seen:
             raise ValueError('Invalid or duplicate evidence receipt')
         seen.add(run['id'])
+        # Limit the summary, not identity validation of the bounded ledger.
+        if len(selected) >= 100:
+            continue
         if run.get('source_fingerprint') != source_sha256 or run.get('source_fingerprint_after') != source_sha256:
             continue
-        if run.get('origin') != 'isolated_replay' or run.get('observed_status') != 'pass' or run.get('observed_exit_code') != 0:
+        code = run.get('observed_exit_code')
+        if (run.get('origin') != 'isolated_replay' or run.get('observed_status') != 'pass'
+                or type(code) is not int or code != 0):
             continue
         iso = run.get('isolation')
         if not isinstance(iso, dict) or iso.get('backend') != 'docker' or not isinstance(iso.get('resolved_image_id'), str):
             continue
-        selected.append({'id': run['id'], 'origin': run['origin'], 'snapshot_sha256': iso.get('snapshot_sha256'),
-                         'image_id': iso['resolved_image_id'], 'status': run['observed_status'],
-                         'snapshot_excluded_total': iso.get('snapshot_excluded_total')})
-        if len(selected) >= 100:
-            break
+        receipt = {'id': run['id'], 'origin': run['origin'], 'snapshot_sha256': iso.get('snapshot_sha256'),
+                   'image_id': iso['resolved_image_id'], 'status': run['observed_status'],
+                   'snapshot_excluded_total': iso.get('snapshot_excluded_total')}
+        if not _valid_isolated_receipt(receipt):
+            continue
+        selected.append(receipt)
     return selected
 
 
@@ -319,25 +345,53 @@ def verify(root: Path, envelope_path: Path, public_path: Path, report_path: Path
     if not isinstance(stmt, dict) or stmt.get('_type') != STATEMENT_TYPE or stmt.get('predicateType') != PREDICATE_TYPE:
         raise ValueError('Unrecognized attestation statement or predicate')
     predicate = stmt.get('predicate')
-    if not isinstance(predicate, dict) or predicate.get('schema_version') != 1:
+    if (not isinstance(predicate, dict) or type(predicate.get('schema_version')) is not int
+            or predicate['schema_version'] != 1):
         raise ValueError('Unsupported predicate version')
     source = predicate.get('source')
     git = predicate.get('git')
-    if not isinstance(source, dict) or not SHA_RE.fullmatch(str(source.get('sha256', ''))) or not isinstance(git, dict):
-        raise ValueError('Invalid signed source or Git claim')
+    if (not isinstance(source, dict) or not _is_sha256(source.get('sha256'))
+            or any(type(source.get(field)) is not int or source[field] < 0
+                   for field in ('files', 'skipped_count'))
+            or source.get('ignored_and_external_inputs_unverified') is not True):
+        raise ValueError('Invalid signed source claim')
+    if (not isinstance(git, dict) or not {'available', 'head', 'dirty'} <= git.keys()
+            or type(git['available']) is not bool):
+        raise ValueError('Invalid signed Git claim')
+    if git['available']:
+        if (not isinstance(git['head'], str) or not GIT_RE.fullmatch(git['head'])
+                or type(git['dirty']) is not bool):
+            raise ValueError('Invalid signed Git claim')
+    elif git['head'] is not None or git['dirty'] is not None:
+        raise ValueError('Invalid signed Git claim')
+    # Offline mode omits attachment comparison, not the mandatory signed hashes.
+    for field in ('report_sha256', 'ledger_sha256', 'manifest_sha256'):
+        if not _is_sha256(predicate.get(field)):
+            raise ValueError(f'Invalid {field.removesuffix("_sha256")} digest')
     if stmt.get('subject') != [
         {'name': 'source-snapshot', 'digest': {'sha256': source['sha256']}},
         {'name': '.raee/report.json', 'digest': {'sha256': predicate.get('report_sha256')}}]:
         raise ValueError('Subject does not match signed predicate')
-    if not SHA_RE.fullmatch(str(predicate.get('report_sha256', ''))):
-        raise ValueError('Invalid report digest')
-    report = _read_json(report_path, MAX_REPORT)
-    if _digest(_file(report_path, MAX_REPORT)) != predicate['report_sha256']:
+    # Authenticate the exact bytes being parsed, even if the path is replaced
+    # after reading. This checks captured evidence, not future file contents.
+    report_raw = _file(report_path, MAX_REPORT)
+    report = _json_object(report_raw)
+    if _digest(report_raw) != predicate['report_sha256']:
         raise ValueError('Evidence report changed since signing')
-    if report.get('source', {}).get('sha256') != source['sha256'] or report.get('overall') != predicate.get('report_overall'):
+    report_source = report.get('source')
+    if (not isinstance(report_source, dict) or report_source.get('sha256') != source['sha256']
+            or report.get('overall') != predicate.get('report_overall')):
         raise ValueError('Report content conflicts with signed predicate')
-    if not isinstance(report.get('git'), dict) or report['git'].get('head') != git.get('head'):
+    report_git = report.get('git')
+    if (not isinstance(report_git, dict) or report_git.get('head') != git['head']
+            or report_git.get('available') is not git['available']):
         raise ValueError('Signed Git commit conflicts with report')
+    if git['available']:
+        changed = report_git.get('changed_paths')
+        if (not isinstance(changed, list) or any(not isinstance(path, str) for path in changed)
+                or report_git.get('changed_paths_truncated', False) is not False
+                or bool(changed) != git['dirty']):
+            raise ValueError('Signed Git dirty state conflicts with report')
     if expected_commit is not None:
         if not GIT_RE.fullmatch(expected_commit.lower()) or git.get('head') != expected_commit.lower():
             raise ValueError('Signed evidence does not match expected Git commit')
@@ -346,18 +400,25 @@ def verify(root: Path, envelope_path: Path, public_path: Path, report_path: Path
     receipts = predicate.get('isolated_receipts')
     if not isinstance(receipts, list) or len(receipts) > 100:
         raise ValueError('Invalid isolated receipt list')
+    seen_receipts = set()
+    for receipt in receipts:
+        if not _valid_isolated_receipt(receipt) or receipt['id'] in seen_receipts:
+            raise ValueError('Invalid or duplicate isolated receipt')
+        seen_receipts.add(receipt['id'])
     if require_isolated and not receipts:
         raise ValueError('No isolated execution receipt recorded in signed statement')
     if ledger_path is not None:
-        ledger = _read_json(ledger_path, MAX_LEDGER)
-        if _digest(_file(ledger_path, MAX_LEDGER)) != predicate.get('ledger_sha256'):
+        ledger_raw = _file(ledger_path, MAX_LEDGER)
+        ledger = _json_object(ledger_raw)
+        if _digest(ledger_raw) != predicate['ledger_sha256']:
             raise ValueError('Ledger digest differs from signed record')
         found = _verify_ledger_references(report, ledger, source['sha256'])
         if found != receipts:
             raise ValueError('Isolated receipt inventory differs from signed ledger')
     if manifest_path is not None:
-        _read_json(manifest_path, MAX_REPORT)
-        if _digest(_file(manifest_path, MAX_REPORT)) != predicate.get('manifest_sha256'):
+        manifest_raw = _file(manifest_path, MAX_REPORT)
+        _json_object(manifest_raw)
+        if _digest(manifest_raw) != predicate['manifest_sha256']:
             raise ValueError('Manifest digest differs from signed record')
     if check_current:
         actual = core.fingerprint(root.resolve())

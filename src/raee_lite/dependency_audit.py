@@ -15,6 +15,8 @@ from .dependency_scope import _normal_paths, MAX_FILE_BYTES, MAX_TOTAL_BYTES
 
 MAX_VISITED = 128
 MAX_AST_NODES = 100_000
+MAX_MODULE_RESOLUTIONS = 1_024
+MAX_RESOLUTION_ROOTS = 8_192
 _DYNAMIC = {"__import__", "import_module", "exec", "eval"}
 
 
@@ -135,6 +137,27 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
     visited: set[str] = set()
     total_bytes = 0
     ast_nodes = 0
+    # Search roots are fixed for this audit. Cache misses as well as hits, but
+    # never retain filesystem conclusions across separate audits. Source reads
+    # still perform their own no-follow and identity checks before parsing.
+    resolutions: dict[str, tuple[frozenset[str], bool]] = {}
+    resolution_roots = 0
+    resolution_exhausted = False
+
+    def resolve(module):
+        nonlocal resolution_roots, resolution_exhausted
+        if module not in resolutions:
+            if (len(resolutions) >= MAX_MODULE_RESOLUTIONS or
+                    resolution_roots + len(search_roots) > MAX_RESOLUTION_ROOTS):
+                resolution_exhausted = True
+                warnings.add("MODULE_RESOLUTION_BUDGET_EXCEEDED")
+                return frozenset(), False
+            resolution_roots += len(search_roots)
+            resolutions[module] = (
+                frozenset(_module_paths(root, module, search_roots)),
+                _looks_project_local(module, search_roots),
+            )
+        return resolutions[module]
 
     def enqueue(targets):
         discovered.update(targets)
@@ -144,7 +167,7 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
         return bool(targets)
 
     def discover(module):
-        return enqueue(_module_paths(root, module, search_roots))
+        return enqueue(resolve(module)[0])
 
     while queue:
         if len(visited) >= MAX_VISITED:
@@ -179,13 +202,18 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
         else:
             package = package.rpartition(".")[0]
         for node in ast.walk(tree):
+            if resolution_exhausted:
+                break
             ast_nodes += 1
             if ast_nodes > MAX_AST_NODES:
                 warnings.add("AST_BUDGET_EXCEEDED")
                 break
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if not discover(alias.name) and _looks_project_local(alias.name, search_roots):
+                    resolved = discover(alias.name)
+                    if resolution_exhausted:
+                        break
+                    if not resolved and resolve(alias.name)[1]:
                         unresolved.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
@@ -198,18 +226,35 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                     base = ".".join(filter(None, [prefix, node.module or ""]))
                 else:
                     base = node.module or ""
-                candidates = [base]
-                candidates.extend(".".join(filter(None, (base, a.name)))
-                                  for a in node.names if a.name != "*")
-                resolved = False
+                base_resolved = discover(base)
+                if resolution_exhausted:
+                    break
+                candidates = (".".join(filter(None, (base, a.name)))
+                              for a in node.names if a.name != "*")
+                resolved = base_resolved
+                unresolved_members = set()
                 for module in candidates:
-                    resolved = discover(module) or resolved
+                    member_resolved = discover(module)
+                    if resolution_exhausted:
+                        break
+                    if member_resolved:
+                        resolved = True
+                    else:
+                        unresolved_members.add(module)
+                if resolution_exhausted:
+                    break
                 if any(a.name in _DYNAMIC for a in node.names):
                     warnings.add("DYNAMIC_EXECUTION_OR_IMPORT:" + rel)
                 # A resolved base may export an attribute with the imported
                 # name, so an unresolved base.name is not itself an omission.
-                if not resolved and (node.level or _looks_project_local(base, search_roots)):
-                    unresolved.add(base or f"relative-from:{rel}")
+                if node.level or resolve(base)[1]:
+                    if not resolved:
+                        unresolved.add(base or f"relative-from:{rel}")
+                    elif not base_resolved:
+                        # Namespace packages have no source exporting these
+                        # attributes. One found child must not conceal other
+                        # unresolved members in the same from-import.
+                        unresolved.update(unresolved_members)
                 if any(a.name == "*" for a in node.names):
                     warnings.add("STAR_IMPORT:" + rel)
             elif isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
@@ -218,7 +263,7 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                 referenced = node.id if isinstance(node, ast.Name) else node.attr
                 if referenced in _DYNAMIC:
                     warnings.add("DYNAMIC_EXECUTION_OR_IMPORT:" + rel)
-        if "AST_BUDGET_EXCEEDED" in warnings:
+        if resolution_exhausted or "AST_BUDGET_EXCEEDED" in warnings:
             break
     missing = sorted(discovered - declared)
     return {

@@ -9,8 +9,9 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from .safe_io import safe_read_json, write_json as atomic_json, read_bytes, write_text as atomic_text
-from .safe_io import exclusive_lock, bounded_walk
+from .safe_io import exclusive_lock, bounded_walk, MAX_STORED_JSON
 from .evidence_binding import intent_digest, evaluate_binding, valid_execution
 from .dependency_scope import snapshot as declared_dependency_snapshot
 from .dependency_audit import audit_local_python_scope
@@ -33,6 +34,8 @@ MAX_RUNS = 2_000
 MANIFEST = Path(".raee") / "manifest.json"
 LEDGER = Path(".raee") / "ledger.json"
 LEDGER_LOCK = Path(".raee") / "ledger.lock"
+MANIFEST_LOCK = Path(".raee") / "manifest.lock"
+REPORT_LOCK = Path(".raee") / "report.lock"
 
 
 def utcnow() -> str:
@@ -52,6 +55,30 @@ def read_json(path: Path, default=None):
 
 def write_json(path: Path, obj) -> None:
     atomic_json(path, obj)
+
+
+@contextmanager
+def stable_inputs(root: Path, inputs):
+    """Reject reports spanning observed evidence edits without blocking writers.
+
+    This is optimistic consistency for local cooperating writers, not an atomic
+    filesystem snapshot or protection against a hostile owner changing data back.
+    """
+    def versions():
+        result = []
+        for relative in inputs:
+            try:
+                raw = read_bytes(root / relative, MAX_STORED_JSON)
+            except FileNotFoundError:
+                result.append(None)
+            else:
+                result.append(hashlib.sha256(raw).digest())
+        return result
+
+    before = versions()
+    yield
+    if before != versions():
+        raise ValueError('Evidence inputs changed while building report; retry the audit')
 
 
 def append_receipt(root: Path, entry: dict, *, lock_timeout: float = 5.0) -> dict:
@@ -87,7 +114,8 @@ def paths(root: Path) -> list[Path]:
         try:
             code, raw, truncated = capture_bounded(
                 [git, '--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-files',
-                 '--cached', '--others', '--exclude-standard', '-z'], root, limit=8_000_000)
+                 '--cached', '--others', '--exclude-standard', '-z'], root,
+                limit=8_000_000, reject_stderr=True)
             if code == 0 or truncated:
                 out = []
                 start = 0
@@ -147,7 +175,9 @@ def fingerprint(root: Path) -> dict:
         except (OSError, ValueError):
             skipped.append({"file": relative, "reason": "unreadable"})
             continue
-        digest.update(relative.encode("utf-8", errors="replace") + b"\x00")
+        # Preserve filesystem bytes, including POSIX surrogate-escaped names.
+        # Replacing undecodable bytes would give distinct paths the same binding.
+        digest.update(os.fsencode(relative) + b"\x00")
         digest.update(hashlib.sha256(contents).digest())
     # Skip records participate in the digest; still report that full proof is unavailable.
     digest.update(json.dumps(skipped, sort_keys=True).encode())
@@ -166,8 +196,11 @@ def git_context(root: Path) -> dict:
         command = git_metadata_command(command, root)
         if command is None:
             return {'available': False, 'reason': 'git_filter_config_unavailable'}
-        head_code, head, _ = capture_bounded([*command, "rev-parse", "HEAD"], root, limit=128)
-        status_code, status, truncated = capture_bounded([*command, "status", "--porcelain", "--untracked-files=normal"], root)
+        head_code, head, _ = capture_bounded([*command, "rev-parse", "HEAD"], root,
+                                            limit=128, reject_stderr=True)
+        status_code, status, truncated = capture_bounded(
+            [*command, "status", "--porcelain", "--untracked-files=normal"], root,
+            reject_stderr=True)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {"available": False}
     lines = status.decode('utf-8', errors='replace').splitlines()
@@ -197,45 +230,51 @@ def get_manifest(root: Path) -> dict:
 
 
 def init(root: Path) -> str:
-    if (root / MANIFEST).exists() or (root / LEDGER).exists():
-        raise ValueError(".raee already initialized (files left unchanged)")
-    write_json(root / MANIFEST, {
-        "schema": 1,
-        "goal": "Describe the coding task and intended behavior here",
-        "requirements": [],
-        "boundaries": [
-            "A passing command does not prove overall behavioral correctness.",
-            "Unexecuted paths, dependency vulnerabilities, and production behavior remain unverified.",
-        ],
-    })
-    write_json(root / LEDGER, {"schema": 1, "runs": []})
+    # Every initializer and manifest editor uses this lock. The ledger lock
+    # additionally prevents initialization from overwriting a concurrent append.
+    # Keep this lock order: manifest, then ledger. Readers remain non-blocking.
+    with exclusive_lock(root / MANIFEST_LOCK), exclusive_lock(root / LEDGER_LOCK):
+        if (root / MANIFEST).exists() or (root / LEDGER).exists():
+            raise ValueError(".raee already initialized (files left unchanged)")
+        write_json(root / MANIFEST, {
+            "schema": 1,
+            "goal": "Describe the coding task and intended behavior here",
+            "requirements": [],
+            "boundaries": [
+                "A passing command does not prove overall behavioral correctness.",
+                "Unexecuted paths, dependency vulnerabilities, and production behavior remain unverified.",
+            ],
+        })
+        write_json(root / LEDGER, {"schema": 1, "runs": []})
     return str(root / MANIFEST)
 
 
 def add_requirement(root: Path, description: str) -> str:
-    m = get_manifest(root)
     if not isinstance(description, str) or not description.strip() or len(description) > 5000:
         raise ValueError("Requirement must contain 1..5000 characters")
-    if len(m.get('requirements', [])) >= 500:
-        raise ValueError('Requirement limit reached (500)')
-    existing = {r["id"] for r in m.get("requirements", [])}
-    idx = 1
-    while f"R{idx}" in existing:
-        idx += 1
-    rid = f"R{idx}"
-    m.setdefault("requirements", []).append({"id": rid, "description": description.strip()})
-    write_json(root / MANIFEST, m)
+    with exclusive_lock(root / MANIFEST_LOCK):
+        m = get_manifest(root)
+        if len(m.get('requirements', [])) >= 500:
+            raise ValueError('Requirement limit reached (500)')
+        existing = {r["id"] for r in m.get("requirements", [])}
+        idx = 1
+        while f"R{idx}" in existing:
+            idx += 1
+        rid = f"R{idx}"
+        m.setdefault("requirements", []).append({"id": rid, "description": description.strip()})
+        write_json(root / MANIFEST, m)
     return rid
 
 
 def add_boundary(root: Path, description: str) -> None:
-    m = get_manifest(root)
     if not isinstance(description, str) or not description.strip() or len(description) > 5000:
         raise ValueError("Boundary must contain 1..5000 characters")
-    if len(m.get('boundaries', [])) >= 2000:
-        raise ValueError('Boundary limit reached (2000)')
-    m.setdefault("boundaries", []).append(description.strip())
-    write_json(root / MANIFEST, m)
+    with exclusive_lock(root / MANIFEST_LOCK):
+        m = get_manifest(root)
+        if len(m.get('boundaries', [])) >= 2000:
+            raise ValueError('Boundary limit reached (2000)')
+        m.setdefault("boundaries", []).append(description.strip())
+        write_json(root / MANIFEST, m)
 
 
 def run_check(root: Path, requirement: str, command: list[str], timeout: int, kind: str | None = None,
@@ -300,6 +339,11 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
 
 
 def audit(root: Path) -> dict:
+    with stable_inputs(root, (MANIFEST, LEDGER)):
+        return _audit(root)
+
+
+def _audit(root: Path) -> dict:
     m = get_manifest(root)
     ledger = read_json(root / LEDGER, {"schema": 1, "runs": []})
     current = fingerprint(root)
@@ -382,6 +426,7 @@ def markdown(report: dict) -> str:
 
 def save_report(root: Path) -> dict:
     report = audit(root)
-    write_json(root / ".raee" / "report.json", report)
-    atomic_text(root / ".raee" / "report.md", markdown(report))
+    with exclusive_lock(root / REPORT_LOCK):
+        write_json(root / ".raee" / "report.json", report)
+        atomic_text(root / ".raee" / "report.md", markdown(report))
     return report

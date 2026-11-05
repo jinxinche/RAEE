@@ -29,7 +29,9 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
     checks: list[Check] = []
     notes: list[str] = []
     package_json = root / "package.json"
-    if package_json.is_file() and not package_json.is_symlink():
+    if package_json.is_symlink():
+        notes.append("package.json is a symlink; package script discovery skipped")
+    elif package_json.is_file():
         try:
             if package_json.stat().st_size > 1_000_000:
                 raise ValueError('package.json exceeds discovery size limit')
@@ -38,9 +40,16 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
                 raise ValueError('package.json must contain an object')
             scripts = pkg.get("scripts", {})
             if not isinstance(scripts, dict):
-                scripts = {}
-            npm = shutil.which("npm")
-            if not npm:
+                raise ValueError('package.json scripts must contain an object')
+            manager = pkg.get("packageManager")
+            supported_manager = ("packageManager" not in pkg or
+                                 isinstance(manager, str) and
+                                 re.fullmatch(r"npm@[^\s]+", manager) is not None)
+            npm = shutil.which("npm") if supported_manager else None
+            if not supported_manager:
+                notes.append("Unsupported package.json packageManager; package script discovery "
+                             "skipped; add explicit commands for the declared package manager")
+            elif not npm:
                 notes.append("package.json found but npm is unavailable in PATH")
             else:
                 for kind in ("test", "typecheck", "lint", "build"):
@@ -55,21 +64,33 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
         except (OSError, UnicodeError, ValueError, TypeError) as ex:
             notes.append(f"Could not parse package.json: {type(ex).__name__}")
 
-    python_indicators = [root / "pyproject.toml", root / "pytest.ini", root / "setup.cfg"]
-    has_pytest_tests = (root / "tests").is_dir() and any((root / "tests").glob("test_*.py"))
-    has_pytest_cfg = (root / "pytest.ini").is_file() or (root / "conftest.py").is_file()
-    if has_pytest_tests or has_pytest_cfg:
-        # pytest is an explicit project test command. If it is absent, the failure is
-        # reported instead of silently replacing it with a different test runner.
-        checks.append(Check("auto:python:test", "test", (sys.executable, "-m", "pytest", "-q"),
-                            "Python tests/ or pytest configuration found; pytest must be installed"))
-    elif (root / "tests").is_dir() and any((root / "tests").glob("*_test.py")):
-        checks.append(Check("auto:python:unittest", "test", (sys.executable, "-m", "unittest", "discover", "-s", "tests"),
-                            "Python unittest-style tests detected"))
+    python_indicators = [root / name for name in
+                         ("tests", "pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg")]
+    linked_python = [path.name for path in python_indicators if path.is_symlink()]
+    if linked_python:
+        notes.append("Python test discovery skipped for symlinked paths: " +
+                     ", ".join(linked_python) + "; add explicit commands")
+    else:
+        tests = root / "tests"
+        has_pytest_tests = tests.is_dir() and any(
+            not path.is_symlink() and path.is_file()
+            for pattern in ("test_*.py", "*_test.py") for path in tests.glob(pattern)
+        )
+        has_pytest_cfg = (root / "pytest.ini").is_file() or (root / "conftest.py").is_file()
+        if has_pytest_tests or has_pytest_cfg:
+            # Both filename patterns are pytest defaults; neither identifies the
+            # test framework. unittest can silently pass without collecting them.
+            # A missing pytest must fail instead of selecting another runner.
+            checks.append(Check("auto:python:test", "test", (sys.executable, "-m", "pytest", "-q"),
+                                "Python tests/ or pytest configuration found; pytest must be installed"))
 
-    if (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
-        if shutil.which("ruff"):
-            checks.append(Check("auto:python:lint", "lint", (shutil.which("ruff") or "ruff", "check", "."),
+    ruff_configs = [root / "ruff.toml", root / ".ruff.toml"]
+    if any(path.is_symlink() for path in ruff_configs):
+        notes.append("Ruff discovery skipped for symlinked configuration; add explicit commands")
+    elif any(path.is_file() for path in ruff_configs):
+        ruff = shutil.which("ruff")
+        if ruff:
+            checks.append(Check("auto:python:lint", "lint", (ruff, "check", "."),
                                 "Ruff configuration detected"))
         else:
             notes.append("Ruff configuration found, but ruff is not available in PATH")

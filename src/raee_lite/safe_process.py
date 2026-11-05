@@ -12,22 +12,31 @@ import threading
 MAX_TIMEOUT = 3600
 
 
-def capture_bounded(command, cwd, *, limit=250_000, timeout=15):
+def capture_bounded(command, cwd, *, limit=250_000, timeout=15, reject_stderr=False):
     """Bound trusted metadata output and the wait for both process exit and EOF.
 
     Abnormal exits kill the POSIX process group, including inherited pipe writers.
+    With reject_stderr, the first stderr byte aborts capture with ValueError;
+    stderr is never accumulated or included in the error. Otherwise it is ignored.
     On Windows only the direct child is killed: descendants may survive and keep
-    the daemon reader alive until they close stdout. This is not containment.
+    daemon readers alive until they close the inherited pipes. This is not
+    containment, and process creation itself cannot be interrupted by the deadline.
     """
     if (not isinstance(limit, int) or isinstance(limit, bool) or
-            not 1 <= limit <= 8_000_000 or not 0 < timeout <= MAX_TIMEOUT):
+            not 1 <= limit <= 8_000_000 or
+            not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or
+            not 0 < timeout <= MAX_TIMEOUT):
         raise ValueError('Invalid capture budget')
     deadline = time.monotonic() + timeout
     options = {'start_new_session': True} if os.name == 'posix' else {}
     proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **options)
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE if reject_stderr else subprocess.DEVNULL,
+                            **options)
     output, failures = [], []
-    reader = None
+    readers = []
+    stderr_seen = threading.Event()
+    timeout_error = None
     completed = False
 
     def stop():
@@ -54,19 +63,35 @@ def capture_bounded(command, cwd, *, limit=250_000, timeout=15):
             # thread can block indefinitely on its read lock (notably Windows).
             proc.stdout.close()
 
+    def inspect_stderr():
+        try:
+            # Read only one byte: waiting for a larger buffer or EOF can delay
+            # rejection indefinitely when a warning is followed by a stalled child.
+            if proc.stderr.read(1):
+                stderr_seen.set()
+                stop()
+        except Exception as exc:
+            failures.append(exc)
+            stop()
+        finally:
+            proc.stderr.close()
+
     try:
-        reader = threading.Thread(target=consume, daemon=True)
-        reader.start()
+        streams = [(proc.stdout, consume)]
+        if reject_stderr:
+            streams.append((proc.stderr, inspect_stderr))
+        for stream, target in streams:
+            reader = threading.Thread(target=target, daemon=True)
+            readers.append((stream, reader))
+            reader.start()
         proc.wait(timeout=max(0, deadline - time.monotonic()))
-        reader.join(timeout=max(0, deadline - time.monotonic()))
-        if reader.is_alive():
-            raise subprocess.TimeoutExpired(command, timeout)
-        if failures:
-            raise ValueError('Unable to complete bounded command output') from failures[0]
-        raw = output[0] if output else b''
-        result = proc.returncode, raw[:limit], len(raw) > limit
+        for _, reader in readers:
+            reader.join(timeout=max(0, deadline - time.monotonic()))
+            if reader.is_alive():
+                raise subprocess.TimeoutExpired(command, timeout)
         completed = True
-        return result
+    except subprocess.TimeoutExpired as exc:
+        timeout_error = exc
     finally:
         try:
             if not completed:
@@ -76,10 +101,24 @@ def capture_bounded(command, cwd, *, limit=250_000, timeout=15):
                 # Reap even after KeyboardInterrupt or failure to start a reader.
                 proc.wait(timeout=1)
             finally:
-                if reader is not None and reader.ident is not None:
-                    reader.join(timeout=1)
-                if reader is None or not reader.is_alive():
-                    proc.stdout.close()
+                cleanup_deadline = time.monotonic() + 1
+                for _, reader in readers:
+                    if reader.ident is not None:
+                        reader.join(timeout=max(0, cleanup_deadline - time.monotonic()))
+                for stream in (proc.stdout, proc.stderr):
+                    if stream is not None and not any(
+                            owned is stream and reader.is_alive() for owned, reader in readers):
+                        stream.close()
+    # Cleanup may observe stderr after a timeout, so check it before reporting
+    # the timeout. No successful/truncated result can conceal observed stderr.
+    if stderr_seen.is_set():
+        raise ValueError('Command emitted stderr')
+    if timeout_error is not None:
+        raise timeout_error
+    if failures:
+        raise ValueError('Unable to complete bounded command output') from failures[0]
+    raw = output[0] if output else b''
+    return proc.returncode, raw[:limit], len(raw) > limit
 
 
 def git_metadata_command(command, cwd):
@@ -94,7 +133,7 @@ def git_metadata_command(command, cwd):
     try:
         code, raw, truncated = capture_bounded(
             [*command, 'config', '--includes', '--null', '--name-only', '--get-regexp',
-             r'^filter\..*\.(clean|process|required)$'], cwd)
+             r'^filter\..*\.(clean|process|required)$'], cwd, reject_stderr=True)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     if truncated or code not in (0, 1):
@@ -123,7 +162,13 @@ def git_metadata_command(command, cwd):
 
 
 def run(command, cwd, timeout=120, env=None):
-    if not command or not 1 <= timeout <= MAX_TIMEOUT:
+    """Discard command output and reap the direct child on abnormal waits.
+
+    Process creation consumes the budget but cannot itself be interrupted.
+    Killing a Windows child does not terminate or isolate its descendants.
+    """
+    if (not command or not isinstance(timeout, (int, float)) or
+            isinstance(timeout, bool) or not 1 <= timeout <= MAX_TIMEOUT):
         raise ValueError('Command required; timeout must be between 1 and 3600 seconds')
     start = time.monotonic()
     # Never capture untrusted stdout/stderr in process memory or persist secrets.
@@ -137,16 +182,28 @@ def run(command, cwd, timeout=120, env=None):
         proc = subprocess.Popen(list(command), **params)
     except (FileNotFoundError, PermissionError) as ex:
         return 127, type(ex).__name__, round(time.monotonic() - start, 2)
+    completed = False
+    error = None
     try:
-        code = proc.wait(timeout=timeout)
-        return code, None, round(time.monotonic() - start, 2)
+        remaining = start + timeout - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout)
+        code = proc.wait(timeout=remaining)
+        completed = True
     except subprocess.TimeoutExpired:
-        try:
-            if os.name == 'posix':
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()  # Windows descendants may survive; not a security boundary
-        except (ProcessLookupError, PermissionError):
-            proc.kill()
-        proc.wait()
-        return 124, 'TimeoutExpired', round(time.monotonic() - start, 2)
+        code, error = 124, 'TimeoutExpired'
+    finally:
+        if not completed:
+            try:
+                try:
+                    if os.name == 'posix':
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    proc.kill()
+            finally:
+                proc.wait(timeout=1)
+    return code, error, round(time.monotonic() - start, 2)

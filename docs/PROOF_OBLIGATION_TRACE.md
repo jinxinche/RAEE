@@ -30,7 +30,8 @@ Now `unit` remains `MISSING` because the earlier no-op receipt had no self-decla
 - `requirement:R#` — intent, not implementation.
 - `scope:R#:KIND` — a **user-declared** obligation. Edge `EXPECTED_ROLE_AS_DECLARED` carries declaration strength only.
 - `receipt:E#` — a **self-labelled execution receipt**. Edge `MATCHED_BY_SELF_DECLARED_KIND` records a process-level association, not semantic relevance.
-- `source:current` — current content fingerprint and count of skipped files. Edge `SOURCE_FINGERPRINT_MATCHES_CURRENT` is created only for a fresh `OBSERVED_PASS` scope. A stale, failed, partial or missing receipt **never** gets a current-source edge.
+- `source:current` — current content fingerprint and count of skipped files. Passing globally bound receipts connect through `SOURCE_FINGERPRINT_MATCHES_CURRENT`.
+- `source:declared:R#:KIND` — passing scoped receipts connect through `DECLARED_INPUTS_MATCH_CURRENT`, establishing declared-input freshness only. A stale, failed, partial or missing receipt **never** gets a passing freshness edge.
 
 Unresolved obligations carry deterministic reason codes (`NO_CONTRACT`, `MISSING`, `STALE`, `FAILED`, `PARTIAL`) and a next action. These are workflow suggestions, not automated repair guarantees.
 

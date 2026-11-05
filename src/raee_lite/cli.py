@@ -127,7 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     cv.add_argument('--out', required=True, help='Aggregate JSON results; raw logs are not copied')
     cv.add_argument('--require-exact', action='store_true', help='Fail on mismatches or incomplete parsing')
     args = parser.parse_args(argv)
-    root = Path(args.project).resolve()
+    try:
+        root = Path(args.project).resolve()
+    except (ValueError, OSError, RuntimeError) as exc:
+        # pathlib uses RuntimeError for symlink loops on Python 3.10-3.12.
+        parser.exit(2, f"Error: {exc}\n")
     def project_path(value: str) -> Path:
         path = Path(value).expanduser()
         return path if path.is_absolute() else root / path
@@ -174,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0
         if args.action == "isolate":
+            if not 128 <= args.memory_mb <= 4096:
+                raise ValueError("Memory limit must be between 128 and 4096 MB")
             if not args.dry_run:
                 _check_ci_execution(args)
             cmd = args.command[1:] if args.command and args.command[0] == "--" else args.command

@@ -5,9 +5,11 @@ from pathlib import Path
 from . import core
 from .agent_logs import IMPORTS
 from .evidence_binding import evaluate_binding, evaluate_environment, valid_execution
+from .safe_io import exclusive_lock
 from .topic_tags import tags
 
 LINKS = Path('.raee/links.json')
+LINKS_LOCK = Path('.raee/links.lock')
 
 
 def _read_records(path: Path, field: str) -> dict:
@@ -25,9 +27,22 @@ def _require_strings(row: dict, fields: tuple[str, ...], filename: str) -> None:
 
 def _read_links(root: Path) -> dict:
     store = _read_records(root / LINKS, 'links')
+    pairs = set()
     for row in store['links']:
         _require_strings(row, ('requirement', 'evidence_id', 'rationale'), LINKS.name)
+        pair = (row['requirement'], row['evidence_id'])
+        if pair in pairs:
+            raise ValueError('Invalid links.json: duplicate requirement/evidence pair')
+        pairs.add(pair)
     return store
+
+
+def _validate_link_targets(links: list[dict], requirements: set[str], evidence: dict[str, dict]) -> None:
+    for row in links:
+        if row['requirement'] not in requirements:
+            raise ValueError('Invalid links.json: dangling requirement reference')
+        if row['evidence_id'] not in evidence:
+            raise ValueError('Invalid links.json: dangling evidence reference')
 
 
 def available_evidence(root: Path) -> dict[str, dict]:
@@ -79,23 +94,27 @@ def _linked_state(receipt: dict, source: dict, requirements: dict[str, dict]) ->
 
 
 def link_evidence(root: Path, requirement: str, evidence_id: str, reason: str) -> dict:
-    reqs = {r['id'] for r in core.get_manifest(root).get('requirements', [])}
-    if requirement not in reqs:
-        raise ValueError(f'Unknown requirement: {requirement}')
-    evidence = available_evidence(root)
-    if evidence_id not in evidence:
-        raise ValueError(f'Unknown evidence: {evidence_id}')
-    if len(reason.strip()) < 8:
-        raise ValueError('Provide a specific reason of at least 8 characters explaining relevance')
-    store = _read_links(root)
-    record = {'requirement': requirement, 'evidence_id': evidence_id,
-              'rationale': reason.strip()[:1000], 'created_at': core.utcnow(),
-              'self_declared': True}
-    # update manual association, preserving unique pair
-    store['links'] = [x for x in store['links'] if not (x['requirement'] == requirement and x['evidence_id'] == evidence_id)]
-    store['links'].append(record)
-    core.write_json(root / LINKS, store)
-    return record
+    # Read the latest table under the same permanent lock as every mutation;
+    # atomic replacement alone cannot preserve another writer's updates.
+    with exclusive_lock(root / LINKS_LOCK):
+        store = _read_links(root)
+        reqs = {r['id'] for r in core.get_manifest(root).get('requirements', [])}
+        if requirement not in reqs:
+            raise ValueError(f'Unknown requirement: {requirement}')
+        evidence = available_evidence(root)
+        if evidence_id not in evidence:
+            raise ValueError(f'Unknown evidence: {evidence_id}')
+        if len(reason.strip()) < 8:
+            raise ValueError('Provide a specific reason of at least 8 characters explaining relevance')
+        _validate_link_targets(store['links'], reqs, evidence)
+        record = {'requirement': requirement, 'evidence_id': evidence_id,
+                  'rationale': reason.strip()[:1000], 'created_at': core.utcnow(),
+                  'self_declared': True}
+        # update manual association, preserving unique pair
+        store['links'] = [x for x in store['links'] if not (x['requirement'] == requirement and x['evidence_id'] == evidence_id)]
+        store['links'].append(record)
+        core.write_json(root / LINKS, store)
+        return record
 
 
 def build_associations(root: Path, source: dict) -> dict:
@@ -103,11 +122,10 @@ def build_associations(root: Path, source: dict) -> dict:
     by_id = {r['id']: r for r in reqs}
     evidence = available_evidence(root)
     links = _read_links(root)['links']
+    _validate_link_targets(links, set(by_id), evidence)
     explicit = []
     for l in links:
-        e = evidence.get(l.get('evidence_id'))
-        if not e or l['requirement'] not in by_id:
-            continue
+        e = evidence[l['evidence_id']]
         state = _linked_state(e, source, by_id)
         explicit.append({**l, 'state': state, 'basis': 'USER_ASSERTED_ASSOCIATION_NOT_COVERAGE_PROOF'})
     imported = [e for e in evidence.values() if e.get('provenance') == 'UNVERIFIED_AGENT_TRANSCRIPT']

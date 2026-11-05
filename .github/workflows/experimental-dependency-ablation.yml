@@ -47,7 +47,8 @@ jobs:
               "machine": platform.machine(),
               "pointer_bits": struct.calcsize("P") * 8,
           }, indent=2))
-          if actual != expected or struct.calcsize("P") * 8 != 64:
+          if (actual != expected or struct.calcsize("P") * 8 != 64
+              or platform.machine().lower() not in {"x86_64", "amd64"}):
               raise SystemExit("Interpreter version or architecture mismatch")
           PY
       - name: Generate actual runner-local proof-obligation receipt

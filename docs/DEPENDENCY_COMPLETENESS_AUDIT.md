@@ -24,6 +24,12 @@ The standalone audit is advisory: it returns a report without changing or deleti
 
 This changes current applicability, not the historical receipt. Failed checks and stale bindings retain their reasons. No automatic scope expansion or clean-audit promotion occurs; `dependency_completeness_proven` remains false. Earlier ablation results describe their original commit, not this revised policy.
 
+The before-execution, after-execution and current audits must all identify the
+exact declared paths, carry the expected schema and clean status, and explicitly
+contain empty omission, limitation and unresolved-import lists. Any recorded
+omission yields `SCOPE_INCOMPLETE`; malformed, missing or mismatched audit records
+yield `SCOPE_AUDIT_UNCERTAIN`. A clean current audit cannot erase earlier omissions.
+
 ## Example
 
 ```python
@@ -44,4 +50,20 @@ The candidate experiment defines twelve regression jobs: Linux Python 3.10–3.1
 
 Windows exceptions are enumerated by exact test ID in `WINDOWS_CRITICAL_SKIPS`. The allowlist size is not an observed skip count: retain actual per-job summaries and logs. POSIX runners must execute the corresponding permission, FIFO and process-group coverage; the exception list does not authorize POSIX skips.
 
-Next: independent real-repository labels; namespace packages, resource/data dependencies, setup/lock/build files; actual package upgrades and external service revisions. Quantify detected omissions against independently annotated closures, and track false alerts, unobserved dependencies, runtime cost and reviewer effort. Treat dynamic imports and unresolved cases as unknown. Do not use a clean static report to override an unsafe stale-evidence decision.
+Bounded namespace-member checks cover members across project/src roots, relative
+imports and aliases; a resolved member cannot conceal an unresolved sibling.
+Broader namespace semantics and dependency closure remain unproven.
+
+Module resolution caches hits and misses only within a single audit, with limits
+of 1,024 module names and 8,192 search-root units. Budget exhaustion adds
+`MODULE_RESOLUTION_BUDGET_EXCEEDED`; it cannot produce a clean scoped pass.
+Each later audit rechecks the filesystem, and queued source reads retain their
+path-safety checks. AST node limits apply after parsing and are not a hard memory
+limit for parsing untrusted Python text.
+
+Next: independent real-repository labels; resource/data dependencies,
+setup/lock/build files; actual package upgrades and external service revisions.
+Quantify detected omissions against independently annotated closures, and track
+false alerts, unobserved dependencies, runtime cost and reviewer effort. Treat
+dynamic imports and unresolved cases as unknown. Do not use a clean static report
+to override an unsafe stale-evidence decision.

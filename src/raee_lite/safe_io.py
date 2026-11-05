@@ -50,7 +50,7 @@ def exclusive_lock(path: Path, *, timeout: float = 5.0):
     this does not isolate callers from a hostile filesystem owner.
     """
     if (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or
-            not math.isfinite(timeout) or not 0 <= timeout <= 60):
+            not 0 <= timeout <= 60 or not math.isfinite(timeout)):
         raise ValueError('Lock timeout must be finite and between 0 and 60 seconds')
     path = Path(path)
     _reject_links(path)
@@ -178,11 +178,16 @@ def open_regular_read(path: Path, limit: int):
 def read_bytes(path: Path, limit: int) -> bytes:
     with open_regular_read(path, limit) as stream:
         before = os.fstat(stream.fileno())
-        value = stream.read(limit + 1)
+        # Size against this opened regular file, not the usually much larger
+        # configured cap. Read one extra byte to detect growth without reserving
+        # a multi-megabyte buffer for every tiny metadata document.
+        value = stream.read(min(limit, before.st_size) + 1)
         after = os.fstat(stream.fileno())
         if len(value) > limit:
             raise ValueError('Input exceeds byte limit')
-        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        if (len(value) != before.st_size or
+                (before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
+                (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
             raise ValueError('Input changed while reading')
     _reject_links(Path(path))
     return value
@@ -259,7 +264,20 @@ def write_text(path: Path, content: str) -> None:
 
 
 def write_json(path: Path, obj) -> None:
-    content = json.dumps(obj, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
-    if len(content.encode('utf-8')) > MAX_STORED_JSON:
-        raise ValueError('Evidence JSON exceeds byte limit')
+    # Stop traversing oversized collections while encoding, including the
+    # final newline in the budget before any filesystem changes.
+    encoder = json.JSONEncoder(indent=2, ensure_ascii=False, allow_nan=False)
+    chunks, size = [], 1
+    try:
+        for chunk in encoder.iterencode(obj):
+            size += len(chunk.encode('utf-8'))
+            if size > MAX_STORED_JSON:
+                raise ValueError('Evidence JSON exceeds byte limit')
+            chunks.append(chunk)
+    except (UnicodeError, RecursionError) as exc:
+        raise ValueError('Invalid JSON encoding or nesting') from exc
+    content = ''.join(chunks) + '\n'
+    # Python permits keys such as 1 and '1' in one dict, but both serialize as
+    # '1'. Never replace a shared document with JSON our reader will reject.
+    strict_json_loads(content)
     write_text(path, content)

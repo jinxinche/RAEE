@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-06 — Concurrent editing and evidence-validation follow-up
+
+- Serialize manifest, transcript and association updates; reject reports spanning
+  observed input changes. Unchanged transcript imports no longer grow the store.
+- Reject Git warning omissions, malformed historical scope audits, contradictory
+  receipt/report joins and withdrawn PR outcomes. Tighten exact signer identity,
+  verified-result shape and captured-byte offline verification.
+- Guard every test module, cleanup-phase skips and failed-discovery summaries.
+  Inspect previously excluded PR paths, propagate traversal errors, and verify
+  supplemental x64 guards. Installed-wheel smoke now exercises both CLI forms.
+- Size safe reads against the opened file instead of reserving the configured
+  cap for small documents. See the [follow-up audit](docs/ENGINEERING_FOLLOWUP_2026-11-06.md)
+  for measured scope, compatibility and remaining acceptance work.
+
 ## 2026-11-05 engineering audit candidate (not separately released)
 
 - Baseline: the earlier PR stack is merged into `main` at `5a8cc702674a5e4005f0efe3891b39727c5f7897`. [Main CI run 41978577201](https://github.com/jinxinche/RAEE/actions/runs/41978577201) passed all six OS/Python jobs with 268 tests per job; that result does not validate the new working candidate.

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .contracts import KINDS
+
 
 _REMEDY = {
     "MISSING": "Execute a relevant, explicitly labelled check in a trusted environment; review what it actually asserts.",
@@ -30,6 +32,96 @@ _REMEDY = {
 }
 
 
+def _rows(value: Any, label: str, limit: int) -> list[dict]:
+    if (not isinstance(value, list) or len(value) > limit
+            or any(not isinstance(row, dict) for row in value)):
+        raise ValueError(f"Invalid or oversized trace {label}")
+    return value
+
+
+def _validate_joins(report: dict) -> tuple[list[dict], dict[str, dict]]:
+    """Reject ambiguous joins instead of drawing a complete-looking graph."""
+    if not isinstance(report, dict):
+        raise ValueError("Invalid trace report")
+    requirements = _rows(report.get("requirements", []), "requirements", 500)
+    by_id = {}
+    owners = {}
+    for req in requirements:
+        rid = req.get("id")
+        if (not isinstance(rid, str) or not rid or rid in by_id
+                or not isinstance(req.get("requirement"), str)
+                or not isinstance(req.get("state"), str) or not req["state"]):
+            raise ValueError("Invalid or duplicate trace requirement identity")
+        by_id[rid] = req
+
+    provenance = {}
+    for entry in _rows(report.get("verification_provenance", []), "provenance", 2000):
+        receipt_id = entry.get("id")
+        if not isinstance(receipt_id, str) or not receipt_id or receipt_id in provenance:
+            raise ValueError("Invalid or duplicate trace receipt identity")
+        provenance[receipt_id] = entry
+
+    def join_receipt(receipt_id, rid, state, kind=None):
+        if not isinstance(receipt_id, str) or not receipt_id:
+            raise ValueError("Invalid trace receipt reference")
+        if receipt_id in owners and owners[receipt_id] != rid:
+            raise ValueError("Trace receipt belongs to another requirement")
+        owners[receipt_id] = rid
+        # Enhanced audits retain only the last 100 provenance rows. Absence
+        # there cannot invalidate an older receipt; a conflicting row can.
+        entry = provenance.get(receipt_id)
+        if entry is not None:
+            if (entry.get("requirement") != rid or entry.get("origin") == "auto_discovered"
+                    or (kind is not None and entry.get("declared_kind") != kind)):
+                raise ValueError("Trace receipt provenance does not match its declared role")
+            if state == "OBSERVED_PASS" and (type(entry.get("exit_code")) is not int
+                    or entry["exit_code"] != 0 or entry.get("observed_status") != "pass"):
+                raise ValueError("Passing trace receipt contradicts execution provenance")
+
+    for req in requirements:
+        if req.get("evidence_id") is not None:
+            join_receipt(req["evidence_id"], req["id"], req["state"])
+
+    contracts = {}
+    receipt_roles = {}
+    for contract in _rows(report.get("evidence_contracts", []), "contracts", 500):
+        rid = contract.get("id")
+        if not isinstance(rid, str) or rid not in by_id or rid in contracts:
+            raise ValueError("Unknown or duplicate trace contract requirement")
+        if contract.get("requirement", by_id[rid]["requirement"]) != by_id[rid]["requirement"]:
+            raise ValueError("Trace contract requirement text does not match its ID")
+        expected = contract.get("expected_checks", [])
+        if (not isinstance(expected, list) or len(expected) > len(KINDS)
+                or any(not isinstance(kind, str) or kind not in KINDS for kind in expected)
+                or len(set(expected)) != len(expected)):
+            raise ValueError("Invalid trace contract roles")
+        evidence = _rows(contract.get("evidence_by_kind", []), "role evidence", len(KINDS))
+        kinds = [row.get("kind") for row in evidence]
+        if (any(not isinstance(kind, str) for kind in kinds)
+                or len(set(kinds)) != len(kinds) or set(kinds) != set(expected)):
+            raise ValueError("Trace evidence roles do not match declared checks")
+        for row in evidence:
+            state, receipt_id = row.get("state"), row.get("evidence_id")
+            if not isinstance(state, str) or not state:
+                raise ValueError("Invalid trace evidence state")
+            if row.get("binding_kind", "global") not in ("global", "declared_scope"):
+                raise ValueError("Invalid trace evidence binding kind")
+            if state == "MISSING":
+                if receipt_id is not None:
+                    raise ValueError("Missing trace evidence cannot reference a receipt")
+            else:
+                join_receipt(receipt_id, rid, state, row["kind"])
+                if receipt_id in receipt_roles:
+                    raise ValueError("Trace receipt cannot satisfy multiple declared roles")
+                receipt_roles[receipt_id] = (rid, row["kind"])
+        status = ("NO_CONTRACT" if not expected else
+                  "RECORDED" if all(row["state"] == "OBSERVED_PASS" for row in evidence) else "GAPS")
+        if contract.get("status") != status:
+            raise ValueError("Trace contract status contradicts role evidence")
+        contracts[rid] = contract
+    return requirements, contracts
+
+
 def trace(report: dict[str, Any], *, requirement_id: str | None = None) -> dict[str, Any]:
     """Build a bounded role-typed evidence graph from an existing read-only audit.
 
@@ -37,8 +129,7 @@ def trace(report: dict[str, Any], *, requirement_id: str | None = None) -> dict[
     each. All edges carry an explicit evidence-strength qualifier. The function
     has no filesystem, network, shell or model access.
     """
-    requirements = report.get("requirements", [])
-    contracts = {x["id"]: x for x in report.get("evidence_contracts", [])}
+    requirements, contracts = _validate_joins(report)
     if requirement_id and not any(r["id"] == requirement_id for r in requirements):
         raise ValueError(f"Unknown requirement: {requirement_id}")
     source = report.get("source", {})

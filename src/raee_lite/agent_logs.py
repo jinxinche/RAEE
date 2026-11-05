@@ -13,10 +13,11 @@ from collections import OrderedDict
 from pathlib import Path
 
 from . import core
-from .safe_io import strict_json_loads
+from .safe_io import exclusive_lock, strict_json_loads
 from .topic_tags import tags
 
 IMPORTS = Path('.raee/imports.json')
+IMPORTS_LOCK = Path('.raee/imports.lock')
 MAX_LINE = 512_000
 MAX_BYTES = 256_000_000
 MAX_EVENTS = 200_000
@@ -178,7 +179,8 @@ def _open_regular_nofollow(path: Path):
         raise
 
 
-def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
+def import_log(root: Path, source_file: Path, provider: str = 'auto', *,
+               lock_timeout: float = 5.0) -> dict:
     if provider not in ('auto', 'codex', 'claude'):
         raise ValueError('Provider must be codex, claude or auto')
     digest = hashlib.sha256()
@@ -375,36 +377,46 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
             record(pending, key, None, line_no, incomplete=True)
     # Older legacy and modern Codex receipts may mirror one execution. Retain both
     # as observations rather than accidentally merging distinct repeated commands.
-    saved = core.read_json(root / IMPORTS, {'schema': 1, 'observations': [], 'sources': []})
-    if not isinstance(saved, dict) or not isinstance(saved.get('observations'), list):
-        raise ValueError('Invalid existing imported evidence ledger')
-    old = {r['id'] for r in saved['observations'] if isinstance(r, dict) and isinstance(r.get('id'), str)}
     source_digest = digest.hexdigest()
-    added = []
-    for row in observations:
-        uid = 'A' + hashlib.sha256(f"{row['provider']}:{source_digest}:{row['record_key']}:{row['line']}".encode()).hexdigest()[:12]
-        if uid in old:
-            continue
-        added.append({'id': uid, 'provider': row['provider'], 'incomplete': row['incomplete'],
-                      'command_family': row['command_family'], 'check_kind_hint': row['check_kind_hint'],
-                      'topic_tags': row['topic_tags'],
-                      'log_exit_code': row['log_exit_code'],
-                      'log_status': 'RECORDED_ZERO' if row['log_exit_code'] == 0 else 'RECORDED_FAILURE' if row['log_exit_code'] is not None else 'UNKNOWN',
-                      'source_digest': source_digest, 'source_name': '[explicit local JSONL file]',
-                      'line': row['line'], 'end_line': row['end_line'],
-                      'provenance': 'UNVERIFIED_AGENT_TRANSCRIPT', 'current_source_bound': False})
-        old.add(uid)
-    if len(saved['observations']) + len(added) > MAX_OBSERVATIONS:
-        raise ValueError('Imported evidence store would exceed its 25,000-record limit')
-    saved['observations'].extend(added)
-    saved.setdefault('sources', []).append({'sha256': source_digest, 'provider': provider,
-        'name': '[explicit local JSONL file]', 'skipped_oversize_lines': truncated,
-        'skipped_malformed_lines': malformed, 'unmatched_pending_calls': unmatched,
-        'evicted_pending_calls': evicted, 'no_raw_outputs_retained': True})
-    core.write_json(root / IMPORTS, saved)
-    return {'provider': provider, 'new_observations': len(added),
-            'total_observations': len(saved['observations']),
-            'unknown_exits': sum(r['log_exit_code'] is None for r in added),
-            'skipped_oversize_lines': truncated, 'skipped_malformed_lines': malformed,
-            'unmatched_pending_calls': unmatched, 'evicted_pending_calls': evicted,
-            'note': 'Transcript is untrusted; imported records NEVER fulfill contracts.'}
+    # Parse before locking, then deduplicate and check capacity against the latest
+    # committed store. The permanent lockfile also protects atomic replacements.
+    with exclusive_lock(root / IMPORTS_LOCK, timeout=lock_timeout):
+        saved = core.read_json(root / IMPORTS, {'schema': 1, 'observations': [], 'sources': []})
+        if not isinstance(saved, dict) or not isinstance(saved.get('observations'), list):
+            raise ValueError('Invalid existing imported evidence ledger')
+        old = {r['id'] for r in saved['observations'] if isinstance(r, dict) and isinstance(r.get('id'), str)}
+        added = []
+        for row in observations:
+            uid = 'A' + hashlib.sha256(f"{row['provider']}:{source_digest}:{row['record_key']}:{row['line']}".encode()).hexdigest()[:12]
+            if uid in old:
+                continue
+            added.append({'id': uid, 'provider': row['provider'], 'incomplete': row['incomplete'],
+                          'command_family': row['command_family'], 'check_kind_hint': row['check_kind_hint'],
+                          'topic_tags': row['topic_tags'],
+                          'log_exit_code': row['log_exit_code'],
+                          'log_status': 'RECORDED_ZERO' if row['log_exit_code'] == 0 else 'RECORDED_FAILURE' if row['log_exit_code'] is not None else 'UNKNOWN',
+                          'source_digest': source_digest, 'source_name': '[explicit local JSONL file]',
+                          'line': row['line'], 'end_line': row['end_line'],
+                          'provenance': 'UNVERIFIED_AGENT_TRANSCRIPT', 'current_source_bound': False})
+            old.add(uid)
+        if len(saved['observations']) + len(added) > MAX_OBSERVATIONS:
+            raise ValueError('Imported evidence store would exceed its 25,000-record limit')
+        saved['observations'].extend(added)
+        sources = saved.setdefault('sources', [])
+        if not isinstance(sources, list) or any(not isinstance(source, dict) for source in sources):
+            raise ValueError('Invalid existing imported evidence sources')
+        source_record = {'sha256': source_digest, 'provider': provider,
+            'name': '[explicit local JSONL file]', 'skipped_oversize_lines': truncated,
+            'skipped_malformed_lines': malformed, 'unmatched_pending_calls': unmatched,
+            'evicted_pending_calls': evicted, 'no_raw_outputs_retained': True}
+        new_source = source_record not in sources
+        if new_source:
+            sources.append(source_record)
+        if added or new_source:
+            core.write_json(root / IMPORTS, saved)
+        return {'provider': provider, 'new_observations': len(added),
+                'total_observations': len(saved['observations']),
+                'unknown_exits': sum(r['log_exit_code'] is None for r in added),
+                'skipped_oversize_lines': truncated, 'skipped_malformed_lines': malformed,
+                'unmatched_pending_calls': unmatched, 'evicted_pending_calls': evicted,
+                'note': 'Transcript is untrusted; imported records NEVER fulfill contracts.'}

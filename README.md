@@ -14,7 +14,7 @@
 
 **Merged baseline:** The earlier PR stack is merged into `main` at `5a8cc702674a5e4005f0efe3891b39727c5f7897`. [Main CI run 41978577201](https://github.com/jinxinche/RAEE/actions/runs/41978577201) passed all six OS/Python jobs with 268 tests per job. Those results apply to that baseline.
 
-**Working candidate (2026-11-05):** The regression suite includes dedicated negative controls from twenty focused review tasks. The PR description and Checks tab record validation against its exact head commit, including the twelve-job hosted matrix. See the [engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md) for changes and remaining acceptance work.
+**Working candidate (2026-11-06):** The regression suite includes dedicated negative controls from two rounds of focused review tasks. The PR description and Checks tab record validation against its exact head commit, including the twelve-job hosted matrix. See the [first engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md) and [follow-up audit](docs/ENGINEERING_FOLLOWUP_2026-11-06.md) for changes and remaining acceptance work.
 
 Try it from a **disposable Python environment**, after inspecting the source:
 
@@ -103,6 +103,12 @@ raee-lite check         # Generate an evidence-gap report
 ```
 
 The default workflow does not run project-owned scripts. Executing tests is an explicit opt-in and must be limited to code and environments you trust.
+
+Concurrent CLI writers serialize receipt appends, requirement/contract edits,
+transcript imports and evidence links. Keep `.raee/*.lock` files in place while
+writers may be running. If an audit detects evidence changes during report
+generation, let the writers finish and retry. Manual file edits and
+network-filesystem locking are outside this validated concurrency boundary.
 
 ## Privacy and trust boundaries
 

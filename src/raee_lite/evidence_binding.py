@@ -34,10 +34,22 @@ def valid_execution(receipt: dict) -> bool:
     if (type(code) is not int or receipt.get('role') != 'verification' or
             origin not in ('local_explicit', 'isolated_replay', 'auto_discovered') or
             not isinstance(command, list) or not command or
-            any(not isinstance(arg, str) or not arg for arg in command)):
+            any(not isinstance(arg, str) or not arg or '\x00' in arg for arg in command)):
         return False
-    if origin != 'auto_discovered' and not re.fullmatch(r'[0-9a-f]{64}', str(receipt.get('command_sha256', ''))):
-        return False
+    # Automatic receipts retain argv and historically omit this digest. If a
+    # digest is present, every origin must supply a string and honor its binding.
+    if origin != 'auto_discovered' or 'command_sha256' in receipt:
+        digest = receipt.get('command_sha256')
+        if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+            return False
+        redacted = {'local_explicit': ['[explicit command redacted]'],
+                    'isolated_replay': ['[isolated command redacted]']}
+        # The original argv is intentionally unavailable for these exact,
+        # origin-specific placeholders; only cleartext commands can be rehashed.
+        if command != redacted.get(origin):
+            expected = hashlib.sha256(json.dumps(command).encode('utf-8')).hexdigest()
+            if digest != expected:
+                return False
     if code == 0:
         return receipt.get('observed_status') == 'pass' and receipt.get('error') in (None, '')
     return receipt.get('observed_status') in ('fail', 'infrastructure_error')

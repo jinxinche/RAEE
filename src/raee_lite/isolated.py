@@ -85,6 +85,9 @@ def stage_snapshot(root: Path, staging: Path) -> dict:
                 exclude(rel, 'excluded_directory_or_symlink')
         outdir = staging / rel_dir
         outdir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        # mkdir's mode is masked by the host umask; the container UID must
+        # be able to list and traverse every directory in the snapshot.
+        outdir.chmod(0o755)
         for name in filenames:
             source = folder / name
             rel = (rel_dir / name).as_posix()

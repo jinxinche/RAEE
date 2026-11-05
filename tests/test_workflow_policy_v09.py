@@ -1,10 +1,33 @@
 """Policy regression checks on workflows. Not a substitute for live GitHub security review."""
 import unittest
+import contextlib
+import io
+import re
+import textwrap
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 
 class WorkflowPolicy(unittest.TestCase):
+    def test_supplemental_x64_guards_reject_arm64_and_wrong_pointer_width(self):
+        for filename in ('experimental-real-os-matrix.yml', 'experimental-dependency-ablation.yml'):
+            workflow = (ROOT / '.github/workflows' / filename).read_text(encoding='utf-8')
+            match = re.search(r"python - <<'PY'\n(.*?)\n          PY", workflow, re.S)
+            self.assertIsNotNone(match)
+            program = textwrap.dedent(match.group(1)).replace('${{ matrix.python }}', '3.13')
+            for machine, width, accepted in [('x86_64', 8, True), ('AMD64', 8, True),
+                                              ('aarch64', 8, False), ('x86_64', 4, False)]:
+                with self.subTest(workflow=filename, machine=machine, width=width), \
+                        patch('platform.machine', return_value=machine), \
+                        patch('struct.calcsize', return_value=width), \
+                        patch('sys.version_info', (3, 13, 0)), contextlib.redirect_stdout(io.StringIO()):
+                    if accepted:
+                        exec(compile(program, filename, 'exec'), {})
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(program, filename, 'exec'), {})
+
     def test_trusted_issuance_is_main_only(self):
         text=(ROOT/'.github/workflows/trusted-evidence.yml.example').read_text()
         self.assertIn('branches: [main]',text)

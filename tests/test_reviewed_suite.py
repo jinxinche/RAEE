@@ -47,6 +47,38 @@ class ReviewedSuiteTests(unittest.TestCase):
         self.assertFalse(receipt['gate_passed'])
         self.assertEqual(receipt['skipped'], 1)
 
+    def test_class_teardown_skip_cannot_escape_critical_gate(self):
+        code, receipt = self.invoke(
+            ' def test_ok(self): pass\n'
+            ' @classmethod\n def tearDownClass(cls): raise unittest.SkipTest("teardown skipped")\n')
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['tests_run'], 1)
+        self.assertEqual(receipt['skipped'], 1)
+        self.assertFalse(receipt['gate_passed'])
+
+    def test_class_cleanup_skip_cannot_escape_critical_gate(self):
+        code, receipt = self.invoke(
+            ' def test_ok(self):\n'
+            '  def cleanup(): raise unittest.SkipTest("cleanup skipped")\n'
+            '  self.addClassCleanup(cleanup)\n')
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['skipped'], 1)
+        self.assertFalse(receipt['gate_passed'])
+
+    def test_discovery_exception_replaces_prior_successful_summary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            summary = Path(folder) / 'summary.json'
+            summary.write_text(json.dumps({'gate_passed': True}), encoding='utf-8')
+            with patch.object(RUNNER.unittest, 'TestLoader') as loader, \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                loader.return_value.discover.side_effect = ImportError('missing start directory')
+                code = RUNNER.main(['--min-tests', '1', '--summary', str(summary)])
+            result = json.loads(summary.read_text(encoding='utf-8'))
+            self.assertEqual(code, 2)
+            self.assertFalse(result['gate_passed'])
+            self.assertEqual(result['errors'], 1)
+            self.assertEqual(result['tests_run'], 0)
+
     def test_expected_failure_cannot_satisfy_critical_gate(self):
         for windows in (False, True):
             with self.subTest(windows=windows), patch.object(
@@ -64,6 +96,18 @@ class ReviewedSuiteTests(unittest.TestCase):
     def test_reduced_critical_module_is_rejected(self):
         code, _ = self.invoke(' def test_ok(self): pass\n', minima={'test_critical': 2})
         self.assertEqual(code, 2)
+
+    def test_new_modules_require_explicit_minima_before_execution(self):
+        def add_unregistered(suite):
+            extra = unittest.FunctionTestCase(lambda: None)
+            extra.id = lambda: 'test_unregistered.Extra.test_case'
+            suite.addTest(extra)
+            return suite
+
+        code, receipt = self.invoke(' def test_ok(self): pass\n', transform=add_unregistered)
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt['discovered'], 2)
+        self.assertEqual(receipt['tests_run'], 0)
 
     def test_collection_errors_are_fail_visible(self):
         code, receipt = self.invoke(' def test_ok(self): pass\n', errors=['Import failed'])

@@ -31,20 +31,31 @@ HINTS = (
 def set_expectation(root: Path, requirement_id: str, kind: str) -> dict:
     if kind not in KINDS:
         raise ValueError(f"Unknown kind: {kind}; choose one of {', '.join(KINDS)}")
-    m = core.get_manifest(root)
-    for req in m.get("requirements", []):
-        if req.get("id") == requirement_id:
-            current = list(req.get("expected_checks", []))
-            if kind not in current:
-                current.append(kind)
-                req["expected_checks"] = sorted(current)
-                core.write_json(root / core.MANIFEST, m)
-            return req
+    with core.exclusive_lock(root / core.MANIFEST_LOCK):
+        m = core.get_manifest(root)
+        for req in m.get("requirements", []):
+            if req.get("id") == requirement_id:
+                current = list(req.get("expected_checks", []))
+                if kind not in current:
+                    current.append(kind)
+                    req["expected_checks"] = sorted(current)
+                    core.write_json(root / core.MANIFEST, m)
+                return req
     raise ValueError(f"Unknown requirement: {requirement_id}")
 
 
 def suggestions(description: str) -> list[dict]:
     return [{"kind": kind, "reason": reason} for kind, pattern, reason in HINTS if pattern.search(description)]
+
+
+def _clean_scope_audit(audit: object, paths: list[str]) -> bool:
+    """Require explicit empty findings for the exact declared file scope."""
+    return (isinstance(audit, dict)
+            and audit.get("schema") == "raee.dependency_completeness_audit.v1"
+            and audit.get("declared_paths") == paths
+            and audit.get("status") == "NO_STATIC_OMISSIONS_FOUND_UNPROVEN"
+            and all(audit.get(field) == [] for field in (
+                "missing_local_dependencies", "limitations", "unresolved_project_imports")))
 
 
 def assess_contracts(root: Path, source: dict, *, target_environment: dict | None = None,
@@ -101,16 +112,11 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
                     if status == "OBSERVED_PASS":
                         try:
                             scope_audit = audit_local_python_scope(root, context["paths"])
-                            history = [binding.get('audit_before'), binding.get('audit_after')]
-                            if any(isinstance(item, dict) and item.get('missing_local_dependencies') for item in history):
+                            audits = [binding.get('audit_before'), binding.get('audit_after'), scope_audit]
+                            if any(isinstance(item, dict) and item.get('missing_local_dependencies') for item in audits):
                                 status = 'SCOPE_INCOMPLETE'
-                            elif any(not isinstance(item, dict) or item.get('schema') != 'raee.dependency_completeness_audit.v1'
-                                     or item.get('limitations') or item.get('unresolved_project_imports') for item in history):
+                            elif any(not _clean_scope_audit(item, binding['before']['paths']) for item in audits):
                                 status = 'SCOPE_AUDIT_UNCERTAIN'
-                            elif scope_audit["missing_local_dependencies"]:
-                                status = "SCOPE_INCOMPLETE"
-                            elif scope_audit["limitations"] or scope_audit["unresolved_project_imports"]:
-                                status = "SCOPE_AUDIT_UNCERTAIN"
                         except (OSError, ValueError, TypeError, RecursionError):
                             status = "SCOPE_AUDIT_UNCERTAIN"
                 if status != "OBSERVED_PASS":

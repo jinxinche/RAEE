@@ -12,9 +12,9 @@ passed its six OS/Python jobs with 268 tests each. This audit works from that
 baseline. The new candidate is validated separately; historical runs do not prove
 the new code.
 
-Twenty focused agent tasks cover the areas below. The runtime permits six agents
+The first round's twenty focused agent tasks cover the areas below. The runtime permits six agents
 at once, so tasks run in rolling batches. Their findings are reviewed and reproduced
-before integration. All twenty review scopes completed. Agent review is not an independent security certification.
+before integration. All twenty scopes completed for `5d7662e`. Agent review is not an independent security certification.
 
 ## Prioritized changes
 
@@ -66,8 +66,9 @@ before integration. All twenty review scopes completed. Agent review is not an i
 
 ## Validation record
 
-The integrated candidate passed all 478 local tests on macOS ARM64 / Python
-3.11.16 without skips. All 32 test modules have explicit minima. The PR description
+The first integrated candidate, `5d7662e61e2ccb75f2c0ae0e2a944bf8f85e0d67`,
+passed all 478 local tests on macOS ARM64 / Python 3.11.16 without skips.
+At that revision, all 32 test modules had explicit minima. The PR description
 and Checks tab record hosted outcomes for its exact head commit; a workflow
 declaration is not a successful matrix run. Synthetic corpus validation covers
 six cases, and the offline PR boundary smoke covers seven cases.
@@ -124,7 +125,7 @@ manifest's claimed run ID/attempt or establish that the latest run passed.
 | P1 | Exercise actual isolation | A rootless/ephemeral Docker host running positive and adversarial cases, including process descendants and mount boundaries. Mocked Docker tests do not satisfy this. |
 | P1 | Expand dependency evidence | Dynamic imports, runtime resources, build inputs, native libraries, transitive package identities and external state require distinct collection methods. Static audit remains advisory. |
 | P1 | Bind richer environments | Explicit package/ABI/toolchain identities with defined portability policy; OS/Python binding alone cannot prove equivalent execution environments. |
-| P1 | Broader concurrent editing | Ledger appends now serialize cooperating writers. Manifest, transcript-import and association edits still need an explicit multiwriter policy. Network-filesystem lock semantics and a hostile filesystem owner remain outside the validated boundary. Never delete the permanent ledger lockfile while a writer may be active. |
+| P1 | Network and external writers | The follow-up extends local locking to manifest edits, transcript imports and associations. Network-filesystem lock semantics, manual file edits and a hostile filesystem owner remain outside the validated boundary. Never delete permanent lockfiles while a writer may be active. |
 | P1 | Real-world parser and association evaluation | Consented, sanitized, versioned real sessions with independent labels and held-out cases; report errors and uncertainty, not only synthetic accuracy. |
 | P2 | Release reproducibility | Compare independent wheel/sdist builds, verify archive contents and installation, retain hashes and provenance. Dependency bounds and a test matrix do not guarantee reproducibility. |
 | P2 | Performance budgets | Measured large-repository/log fixtures, CPU/memory/latency baselines and meaningful regression thresholds before claiming speedups. |

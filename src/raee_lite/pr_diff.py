@@ -150,9 +150,10 @@ def compare_reports(base: dict, head: dict) -> dict:
     changes = [x for x in changes if x['kind'] != 'requirement' or
                (x['requirement'], _signal(x['head']), x['classification']) not in scoped]
     before, after = base.get('overall'), head.get('overall')
-    if before is not None and after is not None and before != after:
+    if before != after:
+        # Omitted/null outcomes withdraw observations just like missing rows.
         classification = _classification(before, after, OVERALL_PASS)
-        if classification == 'REGRESSION' and any(
+        if classification in ('REGRESSION', 'REMOVED_VERIFIED_EVIDENCE') and any(
                 x['classification'] in ('REGRESSION', 'REMOVED_VERIFIED_EVIDENCE') for x in changes):
             # Preserve the overall downgrade without counting its underlying signals twice.
             classification = 'CHANGED_REVIEW'

@@ -17,6 +17,28 @@ import unittest
 
 
 REQUIRED_TEST_MODULES = {
+    'test_association_concurrency': 10,
+    'test_audit_consistency': 6,
+    'test_binding_edges': 10,
+    'test_cli_edges': 7,
+    'test_contract_edges': 10,
+    'test_dashboard_integrity': 22,
+    'test_dependency_graph_edges': 10,
+    'test_dependency_performance': 8,
+    'test_diff_edges': 7,
+    'test_discovery_integrity': 13,
+    'test_envelope_edges': 22,
+    'test_import_concurrency': 8,
+    'test_inventory_warnings': 4,
+    'test_io_edges': 8,
+    'test_manifest_concurrency': 5,
+    'test_metric_integrity': 10,
+    'test_origin_edges': 30,
+    'test_packaging_edges': 7,
+    'test_pr_boundary_edges': 15,
+    'test_process_edges': 22,
+    'test_snapshot_edges': 6,
+    'test_trace_integrity': 18,
     'test_agent_log_integrity': 22,
     'test_association_metrics_v09': 5,
     'test_attestation_v07': 22,
@@ -44,8 +66,8 @@ REQUIRED_TEST_MODULES = {
     'test_real_cross_os_protocol': 11,
     'test_security_v05': 24,
     'test_signing_integrity': 10,
-    'test_workflow_policy_v09': 7,
-    'test_reviewed_suite': 10,
+    'test_workflow_policy_v09': 8,
+    'test_reviewed_suite': 14,
     'test_trust_chain_rc2': 6,
     'test_v04': 21,
     'test_validation_v09': 23,
@@ -53,6 +75,9 @@ REQUIRED_TEST_MODULES = {
 MIN_TESTS = sum(REQUIRED_TEST_MODULES.values())
 
 WINDOWS_CRITICAL_SKIPS = {
+    'test_pr_boundary_edges.PRBoundaryEdgeTests.test_real_unreadable_directory_fails_closed',
+    'test_inventory_warnings.InventoryWarningTests.test_real_unreadable_directory_cannot_be_reported_as_complete',
+    'test_process_edges.ProcessEdgeTests.test_stderr_only_inherited_pipe_respects_deadline',
     'test_dependency_scope_ablation.DependencyScopeAblationTests.test_project_symlink_path_not_followed',
     'test_real_cross_os_protocol.RealMatrixContract.test_macos_style_temp_symlink_is_canonicalized_only_for_owned_fixture',
     'test_dependency_completeness_audit.CompletenessAuditTests.test_declared_path_through_link_never_reads_external_file',
@@ -86,12 +111,8 @@ def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8')
-    loader = unittest.TestLoader()
-    suite = loader.discover(args.start_dir)
-    count = suite.countTestCases()
-    ids = list(_test_ids(suite))
-    summary = {'schema': 'raee.reviewed_suite.v1', 'discovered': count,
-               'tests_run': 0, 'failures': 0, 'errors': len(loader.errors),
+    summary = {'schema': 'raee.reviewed_suite.v1', 'discovered': 0,
+               'tests_run': 0, 'failures': 0, 'errors': 0,
                'skipped': 0, 'expected_failures': 0, 'unexpected_successes': 0, 'gate_passed': False,
                'environment': {'python': platform.python_version(), 'os': sys.platform,
                                'architecture': platform.machine()},
@@ -105,6 +126,18 @@ def main(argv=None):
             args.summary.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
         return code
 
+    # Invalidate any previous success before collection can fail or abort.
+    finish(2)
+    loader = unittest.TestLoader()
+    try:
+        suite = loader.discover(args.start_dir)
+        count = suite.countTestCases()
+        ids = list(_test_ids(suite))
+    except Exception as exc:
+        summary['errors'] = 1
+        print(f'FAIL CLOSED: test discovery raised {type(exc).__name__}.', file=sys.stderr)
+        return finish(2)
+    summary.update(discovered=count, errors=len(loader.errors))
     print(f'RAEE reviewed suite discovery: {count} tests (minimum: {args.min_tests})', flush=True)
     if loader.errors:
         print('FAIL CLOSED: test collection contains import errors.', file=sys.stderr)
@@ -120,6 +153,11 @@ def main(argv=None):
         missing = sorted(name for name, minimum in REQUIRED_TEST_MODULES.items() if modules[name] < minimum)
         if missing:
             print('FAIL CLOSED: critical regression modules missing or reduced: ' + ', '.join(missing),
+                  file=sys.stderr)
+            return finish(2)
+        unregistered = sorted(set(modules) - set(REQUIRED_TEST_MODULES))
+        if unregistered:
+            print('FAIL CLOSED: register minimum counts for new test modules: ' + ', '.join(unregistered),
                   file=sys.stderr)
             return finish(2)
     class TrackedResult(unittest.TextTestResult):
@@ -144,9 +182,8 @@ def main(argv=None):
     if args.require_critical_modules:
         allowed = WINDOWS_CRITICAL_SKIPS if os.name == 'nt' else set()
         unverified = [test.id() for test, _ in result.skipped
-                      if test.id().split('.', 1)[0] in REQUIRED_TEST_MODULES and test.id() not in allowed]
-        unverified.extend(test.id() for test, _ in result.expectedFailures
-                          if test.id().split('.', 1)[0] in REQUIRED_TEST_MODULES)
+                      if test.id() not in allowed]
+        unverified.extend(test.id() for test, _ in result.expectedFailures)
         if unverified:
             print('FAIL CLOSED: critical tests did not pass: ' + ', '.join(unverified), file=sys.stderr)
             return finish(1)

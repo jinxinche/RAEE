@@ -19,9 +19,15 @@ def wilson(x: int, n: int, z: float = 1.96) -> list[float] | None:
 
 
 def evaluate(rows: list[dict], *, provenance: str = 'synthetic', consent: bool = False) -> dict:
+    """Score every labelled pair; explicit ``observed_kind=None`` means no hint.
+
+    Malformed or missing fields are input errors, not negative predictions.
+    Text fields describe candidates, not unique requirement/evidence identities;
+    equal coarse text must not silently merge independently labelled examples.
+    """
     if provenance not in ('synthetic', 'consented-real'):
         raise ValueError('Specify fixture provenance: synthetic or consented-real')
-    if provenance == 'consented-real' and not consent:
+    if provenance == 'consented-real' and consent is not True:
         raise ValueError('Consent must be affirmed before evaluating private annotations')
     if not isinstance(rows,list) or not 0 < len(rows) <= 100000:
         raise ValueError('Need 1..100000 labelled candidate pairs')
@@ -32,9 +38,13 @@ def evaluate(rows: list[dict], *, provenance: str = 'synthetic', consent: bool =
         if not isinstance(row.get('requirement'),str) or not isinstance(row.get('observed_target'),str):
             raise ValueError('Text fields must be strings')
         kinds = row.get('expected_kinds')
-        if not isinstance(kinds,list) or not all(isinstance(k,str) for k in kinds):
+        if not isinstance(kinds,list) or not all(isinstance(k,str) and k.strip() for k in kinds):
             raise ValueError('Invalid expectation kinds')
-        proposed = row.get('observed_kind') in kinds and bool(set(tags(row['requirement'])) & set(tags(row['observed_target'])))
+        kind = row.get('observed_kind')
+        if 'observed_kind' not in row or (kind is not None and
+                (not isinstance(kind, str) or not kind.strip())):
+            raise ValueError('Observed kind must be a nonempty string or explicit null for unknown')
+        proposed = kind in kinds and bool(set(tags(row['requirement'])) & set(tags(row['observed_target'])))
         truth = row['relevant']
         if proposed and truth: tp+=1
         elif proposed: fp+=1

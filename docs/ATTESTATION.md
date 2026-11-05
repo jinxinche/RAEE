@@ -46,8 +46,10 @@ Default signing **fails closed** when:
 - the attestation destination already exists.
 
 Explicitly weaker modes exist for special uses (`--allow-dirty`, `--allow-no-git`,
-`--allow-partial`). Such attestations retain signed limitations and can be
-rejected by verification policy (`--require-clean`).
+`--allow-partial`). Such attestations retain signed limitations.
+`--require-clean` rejects absent-Git and dirty-checkout claims; it does not reject
+declared partial source coverage. Consumers requiring complete coverage must
+separately enforce `source.skipped_count == 0` in the authenticated predicate.
 
 For an *observed isolated replay* in the same source snapshot, optionally require:
 
