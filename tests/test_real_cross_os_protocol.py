@@ -32,6 +32,27 @@ def fake_receipt(os_name, py_version, *, fingerprint="same-fixture-sha"):
         "requirement_digest": intent_digest("Signup rejects invalid addresses"),
         "observed_exit_code": 0,
         "same_runner_state": "OBSERVED_PASS",
+        "ablation": {
+            "initial_scoped_state": "OBSERVED_PASS",
+            "irrelevant_note_change": {
+                "ground_truth_revoke": False,
+                "global": "STALE",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "OBSERVED_PASS",
+            },
+            "external_revision_change": {
+                "ground_truth_revoke": True,
+                "global": "OBSERVED_PASS",
+                "scoped_files": "OBSERVED_PASS",
+                "scoped_plus_external": "EXTERNAL_STATE_CHANGED",
+            },
+            "relevant_source_change": {
+                "ground_truth_revoke": True,
+                "global": "STALE",
+                "scoped_files": "DEPENDENCY_SOURCE_CHANGED",
+                "scoped_plus_external": "DEPENDENCY_SOURCE_CHANGED",
+            },
+        },
         "hard_negative_harmless_tracked_change": {
             "ground_truth_revoke": False,
             "observed_state": "STALE",
@@ -73,6 +94,14 @@ class RealMatrixContract(unittest.TestCase):
         self.assertEqual((m["TP"], m["FP"], m["TN"], m["FN"]), (30, 6, 6, 6))
         self.assertGreater(m["false_positive_rate"], 0)
         self.assertGreater(m["false_negative_rate"], 0)
+        # Synthetic aggregator unit fixture: not a cloud observation.
+        self.assertEqual(
+            [(m["ablation"][name]["TP"], m["ablation"][name]["FP"],
+              m["ablation"][name]["TN"], m["ablation"][name]["FN"])
+             for name in ("global", "scoped_files", "scoped_plus_external")],
+            [(30, 6, 6, 6), (30, 0, 12, 6), (36, 0, 12, 0)])
+        for item in m["ablation"].values():
+            self.assertEqual(item["relevant_source_revoked"], 6)
 
     def test_missing_runner_is_not_silently_accepted(self):
         self.populate(missing=2)
@@ -88,6 +117,56 @@ class RealMatrixContract(unittest.TestCase):
         self.populate(bad_sha=True)
         with self.assertRaisesRegex(ValueError, "Different source snapshots"):
             AGGREGATOR.summarize(self.root)
+
+    def test_six_distinct_identities_from_wrong_matrix_are_rejected(self):
+        self.populate()
+        for folder in ("4", "5"):
+            path = self.root / folder / "receipt.json"
+            row = json.loads(path.read_text(encoding="utf-8"))
+            row["platform"] = "freebsd"
+            path.write_text(json.dumps(row), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "expected 3 OS"):
+            AGGREGATOR.summarize(self.root)
+
+    def test_malformed_or_inconsistent_receipts_are_rejected(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("schema", "unknown"), ("observed_exit_code", False),
+                           ("intent_digest_present", "true"), ("requirement_digest", "different"),
+                           ("receipt_source_fingerprint", None), ("python", "3.15.2"),
+                           ("receipt_environment", {"os": "other", "python": "3.10.16"})):
+            with self.subTest(key=key):
+                row = json.loads(original)
+                row[key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
+
+    def test_control_labels_and_predictions_cannot_be_relabelled(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("ground_truth_revoke", "false"), ("ground_truth_revoke", True),
+                           ("predicted_revoke", False), ("observed_state", "invented")):
+            with self.subTest(key=key, value=value):
+                row = json.loads(original)
+                row["hard_negative_harmless_tracked_change"][key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
+
+    def test_ablation_rejects_invented_status_and_relabelled_ground_truth(self):
+        self.populate()
+        path = self.root / "0" / "receipt.json"
+        original = path.read_text(encoding="utf-8")
+        for key, value in (("global", "invented"), ("ground_truth_revoke", False)):
+            with self.subTest(key=key):
+                row = json.loads(original)
+                row["ablation"]["relevant_source_change"][key] = value
+                path.write_text(json.dumps(row), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    AGGREGATOR.summarize(self.root)
 
     def test_runner_fixture_lf_bytes_are_explicit(self):
         source = (ROOT / "benchmarks" / "real_runner_receipt.py").read_text(encoding="utf-8")
