@@ -8,9 +8,22 @@
 
 **Release:** `v0.10.0rc2` candidate · **License:** MIT · **Python:** 3.10+ · **No AI API key required for core offline checks**
 
-### A 30-second evidence-gap demo
+### Try the public release candidate
 
-Install the reviewed candidate from [PR #2](https://github.com/jinxinche/RAEE/pull/2) in a disposable Python environment first, then try this inside an empty temporary project directory:
+**Status: public source release candidate, not a stable or security-certified release.** This repository includes the CLI source and installation metadata. See [PR #13 and its validation runs](https://github.com/jinxinche/RAEE/pull/13) for the dependency audit and cross-platform regression evidence. Independent provenance verification and branch-protection acceptance remain separate release gates.
+
+Try it from a **disposable Python environment**, after inspecting the source:
+
+```bash
+git clone https://github.com/jinxinche/RAEE.git
+cd RAEE
+python -m venv .venv
+# Activate the venv using your platform's standard command
+python -m pip install --no-deps .
+raee-lite --version
+```
+
+Inside a fresh, disposable project directory:
 
 ```bash
 raee-lite init
@@ -20,24 +33,15 @@ raee-lite status
 raee-lite check
 ```
 
-Expected result: `R1: UNTESTED` and `EVIDENCE_GAPS`. **No repository-owned tests are executed.** With an unverified requirement, `raee-lite status` intentionally exits with status **1**; that is an evidence-gap signal, not a CLI crash. The subsequent nonexecuting `raee-lite check` returns status **0** in the demonstrated case. A stated requirement is not evidence of its completion. See the [longer reproducible demo](examples/DEMO.md).
+**Expected:** `R1: UNTESTED` and an evidence-gap report. `status` intentionally returns exit code 1 while the requirement has no matching verification evidence; this is not a crash. The nonexecuting `check` command does not run repository-owned tests.
 
-<details>
-<summary>Where to find the source while this release is under review</summary>
+**What makes it useful:** Coding agents' statements, changed files, executed checks and unresolved requirements are *different evidence types*. RAEE-Lite keeps them separate rather than treating a green test as proof that a requested feature works.
 
-The CLI source currently lives in the review branch [`release/raee-lite-v0.10.0rc2`](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2), not yet on default `main`. Review the code and PR before installing:
+[Reproduction details](examples/DEMO.md) · [Security boundaries](SECURITY.md) · [Early-access feedback](https://github.com/jinxinche/RAEE/issues/7) · [Local validation and pending release gates](https://github.com/jinxinche/RAEE/pull/2)
 
-```bash
-git clone --branch release/raee-lite-v0.10.0rc2 https://github.com/jinxinche/RAEE.git
-cd RAEE
-python -m venv .venv
-# Activate .venv, then run:
-python -m pip install --no-deps .
-raee-lite --version
-```
+### New: proof-obligation trace (experimental)
 
-This is a source release candidate; **no PyPI availability or production security assurance is claimed**. The default nonexecuting commands are suitable for inspection; running project-owned checks requires explicit opt-in and a trusted environment.
-</details>
+`raee-lite trace --for R1 --json` emits a **read-only evidence graph** connecting user intent, each declared verification scope, its last self-labelled execution receipt, and source fingerprint relevance. Missing, stale, partial and failed scopes remain explicit; even an `OBSERVED_PASS` never becomes a semantic correctness proof. [Trace example and graph semantics](docs/PROOF_OBLIGATION_TRACE.md).
 
 ### What you get—and what you do not
 
@@ -84,7 +88,7 @@ The design distinguishes **an agent's claim**, **a locally observed command**, a
 
 ## Getting started
 
-**Publication status:** Source code is public on the review branch linked above; the default branch still awaits reviewed release integration. Do not claim stable release, independently verified provenance, or PyPI publication.
+**Publication status:** Install from a reviewed checkout of this repository. This remains a release candidate; no stable release, independently verified provenance or PyPI publication is claimed.
 
 After installing a reviewed release candidate:
 
@@ -119,10 +123,20 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 
 The near-term priorities are a reviewed public source release, real GitHub Actions results on Linux/Windows/macOS, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
-**Current status: public source under PR review; real cross-platform trusted CI and independent provenance acceptance remain pending.** Please do not interpret the README as a claim of production readiness.
+**Current status: public source release candidate with recorded experimental cross-platform results; protected-main acceptance and independent provenance verification remain pending.** Please do not interpret the README as a claim of production readiness.
+
+The dependency-completeness experiment defines twelve regression jobs: Linux Python 3.10–3.15; Windows and macOS Intel Python 3.10/3.15; macOS ARM64 Python 3.10/3.15. Every job builds and exercises an installed package and runs the full regression gate. Check the [candidate PR and run results](https://github.com/jinxinche/RAEE/pull/13) for the exact validated commit; a workflow definition alone is not passing evidence. This matrix is separate from protected-main acceptance.
+
+Scoped evidence now fails closed when the bounded Python audit finds omitted local imports or cannot finish confidently. It never certifies dependency closure. See [the dependency audit policy](docs/DEPENDENCY_COMPLETENESS_AUDIT.md) for states and limits, and [CONTRIBUTING](CONTRIBUTING.md) for the reproducible development and package checks.
+
+## Community discussion
+
+Have a reproducible example of an AI agent claiming "done" without matching evidence? Join the [early-access feedback thread](https://github.com/jinxinche/RAEE/issues/7). Please share only minimal, sanitized examples.
+
+For developers who wish to write about this project, see the [technical explainer](docs/green-tests-not-verified-requirements.md) and [multilingual community outreach guide](docs/COMMUNITY_OUTREACH_EARLY_ACCESS.md). The latter contains drafts, **not published posts or verified reach metrics**.
 
 ## Contributing and license
 
-Issues, reproduction cases, accessibility improvements and translations will be welcome after the source release. Please never submit credentials, private agent conversations, or proprietary code in a public issue.
+Issues, reproduction cases, accessibility improvements and translations are welcome. Please never submit credentials, private agent conversations, or proprietary code in a public issue.
 
 The repository's software license is [MIT](LICENSE). The linked research preprint has its own publication license.

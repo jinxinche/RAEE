@@ -1,5 +1,14 @@
 # Changelog
 
+## Candidate method addition (not separately released)
+
+- Scoped evidence now rejects visible omitted imports (`SCOPE_INCOMPLETE`), uncertain audits (`SCOPE_AUDIT_UNCERTAIN`) and malformed digest records; traces label declared-input matches without implying a whole-repository match.
+- Bound static traversal by file count, bytes and AST nodes; include package initializers, refuse linked inputs and retain explicit limitations. Standalone reports do not mutate receipts or prove closure.
+- Validate real-runner receipt identities, labels and status values before aggregation; historical ablation measurements remain tied to their original commit.
+- Require 268 tests plus critical-module minima and skip/expected-failure checks; add twelve OS/Python/architecture jobs, final matrix gate, test summaries and isolated wheel smoke checks. Fix optional test dependency installation and the setuptools build lower bound.
+- Added offline, read-only `raee-lite trace` with typed proof-obligation nodes/edges, explicit missing/stale/failed/partial causes, and no automatic promotion of self-declared checks into correctness proofs.
+- New JSON trace schema `raee.proof_obligation_trace.v1` and eight focused negative-control tests. Cross-platform CI and independent audit remain release gates.
+
 ## 0.10.0rc2 — Provenance verification and evidence handoff hardening
 
 - Reject GitHub CLI versions earlier than 2.97.0 during attestation verification (CVE-2026-64655).

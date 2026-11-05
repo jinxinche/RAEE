@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -39,7 +40,7 @@ class CiAttestationTests(unittest.TestCase):
         core.add_requirement(self.root, 'Unit tests execute')
         from raee_lite.contracts import set_expectation
         set_expectation(self.root, 'R1', 'unit')
-        core.run_check(self.root, 'R1', ['python', '-c', 'import sys;sys.exit(0)'], 30, kind='unit')
+        core.run_check(self.root, 'R1', [sys.executable, '-c', 'import sys;sys.exit(0)'], 30, kind='unit')
         save_report(self.root)
         self.env = {'CI': 'true', 'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': REPO,
                     'GITHUB_REF': REF, 'GITHUB_SHA': self.sha, 'GITHUB_EVENT_NAME': 'push',
