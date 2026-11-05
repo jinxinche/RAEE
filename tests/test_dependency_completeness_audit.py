@@ -120,6 +120,13 @@ class CompletenessAuditTests(unittest.TestCase):
             self.assertIn("pkg/__init__.py", result["missing_local_dependencies"])
             self.assertIn("INPUT_UNAVAILABLE_OR_UNSAFE:pkg/__init__.py", result["limitations"])
             self.assertNotIn("hidden", result["unresolved_project_imports"])
+            self.write("app.py", "import broken\n")
+            (self.root / "broken.py").symlink_to(target / "missing.py")
+            result = self.audit()
+            self.assertIn("broken.py", result["missing_local_dependencies"])
+            self.assertIn("INPUT_UNAVAILABLE_OR_UNSAFE:broken.py", result["limitations"])
+            (self.root / "src").symlink_to(target, target_is_directory=True)
+            self.assertIn("SOURCE_ROOT_UNAVAILABLE_OR_UNSAFE:src", self.audit()["limitations"])
 
     def test_dynamic_import_alias_remains_uncertain(self):
         self.write("app.py", "from importlib import import_module as load\nload('hidden')\n")

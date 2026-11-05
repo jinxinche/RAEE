@@ -44,6 +44,7 @@ def _module_paths(root: Path, name: str) -> set[str]:
         for rel in (stem + ".py", stem + "/__init__.py"):
             p = search_root / rel
             if _unsafe_path(root, p):
+                found.add(p.relative_to(root).as_posix())
                 continue
             if p.is_file():
                 found.add(p.relative_to(root).as_posix())
@@ -112,6 +113,8 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
     discovered: set[str] = set()
     unresolved: set[str] = set()
     warnings: set[str] = set()
+    if (root / "src").is_symlink():
+        warnings.add("SOURCE_ROOT_UNAVAILABLE_OR_UNSAFE:src")
     queue = deque(sorted(p for p in declared if p.endswith(".py")))
     scheduled = set(queue)
     if not queue:
