@@ -6,7 +6,6 @@ agent-owned assertions or transcript output as independently verified tests.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import stat
@@ -14,6 +13,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from . import core
+from .safe_io import strict_json_loads
 from .topic_tags import tags
 
 IMPORTS = Path('.raee/imports.json')
@@ -23,6 +23,7 @@ MAX_EVENTS = 200_000
 MAX_PENDING = 2048
 MAX_OBSERVATIONS = 25_000
 EXIT = re.compile(r'(?im)^\s*(?:Process exited with code|Exit code|Process exit code)\s*:?\s*(-?\d{1,6})\s*$')
+RUNNING = re.compile(r'Process running with session ID ([A-Za-z0-9_-]+)', re.I)
 CHECKS = (
     (re.compile(r'(^|\s|/)(pytest|py\.test)(\s|$)|python(?:3)?\s+-m\s+pytest\b', re.I), 'unit', 'pytest'),
     (re.compile(r'\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b', re.I), 'unit', 'package test'),
@@ -43,15 +44,64 @@ def characterize(command: str) -> tuple[str, str]:
     return 'unknown', 'shell command [redacted]'
 
 
-def parse_exit(value) -> int | None:
+def _exit_value(value) -> int | None:
     if type(value) is int and -100000 <= value <= 100000:
         return value
-    if isinstance(value, str):
-        if re.fullmatch(r'-?\d{1,6}', value.strip()):
-            return int(value.strip())
-        match = EXIT.search(value[:15000])
-        return int(match.group(1)) if match else None
+    if isinstance(value, str) and re.fullmatch(r'-?[0-9]{1,6}', value.strip()):
+        code = int(value.strip())
+        return code if -100000 <= code <= 100000 else None
     return None
+
+
+def _metadata_exit(value):
+    codes = [_exit_value(value[key]) for key in ('exit_code', 'exitCode', 'code') if key in value]
+    return codes[0] if codes and None not in codes and len(set(codes)) == 1 else None
+
+
+def _session_id(value):
+    if type(value) is int and value >= 0:
+        return str(value)
+    if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
+        return value
+    return None
+
+
+def _wrapper_result(value, *, structured=True):
+    """Read only structured metadata or the leading provider wrapper, never stdout."""
+    if isinstance(value, str):
+        value = value[:12000].strip()
+        if structured and value.startswith('{'):
+            value = strict_json_loads(value)
+    if isinstance(value, dict):
+        session = _session_id(value.get('session_id'))
+        return (None if session else _metadata_exit(value)), session
+    if not isinstance(value, str):
+        return None, None
+    codes, sessions = [], []
+    for line in value.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if match := EXIT.fullmatch(line):
+            codes.append(_exit_value(match.group(1)))
+        elif match := RUNNING.fullmatch(line):
+            sessions.append(match.group(1))
+        elif re.fullmatch(r'(?:Chunk ID|Wall time|Original token count):[^\r\n]*', line, re.I):
+            continue
+        else:
+            # Output:/Final output: and the first body line end the metadata.
+            break
+    if sessions:
+        if len(set(sessions)) != 1:
+            raise ValueError('Ambiguous running session metadata')
+        return None, sessions[0]
+    return (codes[0] if len(codes) == 1 else None), None
+
+
+def parse_exit(value) -> int | None:
+    """Compatibility helper; bare numeric values are metadata only, not output."""
+    code = _exit_value(value)
+    return code if code is not None else _wrapper_result(value)[0]
 
 
 def _command(raw):
@@ -71,34 +121,46 @@ def _safe_str(x, max_len=12000):
 
 
 def _exit_from_claude_result(block, envelope):
-    if isinstance(envelope, dict):
-        for key in ('exitCode', 'exit_code', 'code'):
-            if (code := parse_exit(envelope.get(key))) is not None:
-                return code
+    if isinstance(envelope, dict) and any(key in envelope for key in ('exitCode', 'exit_code', 'code')):
+        code = _metadata_exit(envelope)
+        return None if code == 0 and block.get('is_error') else code
     content = block.get('content')
     texts = [content] if isinstance(content, str) else (
         [b.get('text', '') for b in content[:10] if isinstance(b, dict) and b.get('type') == 'text']
         if isinstance(content, list) else [])
-    return next((v for t in texts if (v := parse_exit(_safe_str(t))) is not None), None)
+    # Multiple text blocks have no unambiguous wrapper boundary.
+    code = _wrapper_result(_safe_str(texts[0]), structured=False)[0] if len(texts) == 1 else None
+    return None if code == 0 and block.get('is_error') else code
 
 
-def _codex_command(payload):
+def _codex_arguments(payload):
     raw = payload.get('arguments') or payload.get('input')
     if isinstance(raw, str):
-        try:
-            raw = json.loads(raw[:12000])
-        except (ValueError, TypeError):
-            return None
-    if isinstance(raw, dict):
-        return _command(raw.get('cmd') or raw.get('command'))
-    return None
+        raw = strict_json_loads(raw[:12000])
+    return raw if isinstance(raw, dict) else {}
+
+
+def _codex_result(payload):
+    if any(key in payload for key in ('exit_code', 'exitCode', 'code')):
+        code = _metadata_exit(payload)
+        # Invalid/absent status must not erase an explicit running wrapper.
+        session = _wrapper_result(payload.get('output'))[1] if code is None else None
+    else:
+        code, session = _wrapper_result(payload.get('output'))
+    session = _session_id(payload.get('session_id')) or session
+    return (None if session else code), session
 
 
 def _open_regular_nofollow(path: Path):
     """Reject symlink in final component, including replacement between check/open."""
     if path.suffix.lower() != '.jsonl':
         raise ValueError('Only explicitly selected .jsonl files are supported')
-    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0)
+    from .safe_io import _reject_links
+    _reject_links(path)
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_BYTES:
+        raise ValueError('Log must be a bounded regular file')
+    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NONBLOCK', 0)
     if hasattr(os, 'O_NOFOLLOW'):
         flags |= os.O_NOFOLLOW
     try:
@@ -107,7 +169,8 @@ def _open_regular_nofollow(path: Path):
         raise ValueError(f'Cannot open regular JSONL source: {type(ex).__name__}') from ex
     try:
         st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_BYTES or path.is_symlink():
+        if (not stat.S_ISREG(st.st_mode) or st.st_size > MAX_BYTES or path.is_symlink() or
+                (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino)):
             raise ValueError('Log must be a regular non-symlink file, <=256 MB')
         return os.fdopen(fd, 'rb')
     except BaseException:
@@ -120,29 +183,55 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
         raise ValueError('Provider must be codex, claude or auto')
     digest = hashlib.sha256()
     claude_pending, codex_pending = OrderedDict(), OrderedDict()
+    sessions, polls = {}, {}
+    seen_calls = {'claude': set(), 'codex': set()}
     observations: list[dict] = []
-    truncated = malformed = ambiguous = 0
+    truncated = malformed = evicted = 0
     counts = {'claude': 0, 'codex': 0}
     nbytes = 0
 
+    def remember_call(pending, key):
+        seen = seen_calls['claude' if pending is claude_pending else 'codex']
+        if key in seen:
+            raise ValueError('Duplicate tool call ID')
+        if len(seen) >= MAX_EVENTS:
+            raise ValueError('Too many tool call IDs; split the log')
+        seen.add(key)
+
     def pending_set(pending, key, cmd, line):
-        nonlocal ambiguous
+        nonlocal evicted
         if not isinstance(key, str) or not key or cmd is None:
             return
-        if len(pending) >= MAX_PENDING and key not in pending:
-            pending.popitem(last=False)
-            ambiguous += 1
-        pending[key] = (cmd, line)
+        # Remember retired/evicted IDs too: a late result must never bind a new call.
+        remember_call(pending, key)
+        if len(pending) >= MAX_PENDING:
+            dropped, _ = pending.popitem(last=False)
+            if pending is codex_pending:
+                forget_session(dropped)
+            evicted += 1
+        pending[key] = (cmd, line, line)
 
-    def record(pending, key, code, line):
+    def forget_session(key):
+        for session, original in list(sessions.items()):
+            if original == key:
+                del sessions[session]
+        for poll, original in list(polls.items()):
+            if original == key:
+                del polls[poll]
+
+    def record(pending, key, code, line, *, incomplete=False):
         if not isinstance(key, str) or key not in pending:
             return
-        command, start = pending.pop(key)
+        command, start, last = pending.pop(key)
+        if pending is codex_pending:
+            forget_session(key)
         kind, preview = characterize(command)
         topic_tags = tags(command)
         if len(observations) >= MAX_OBSERVATIONS:
             raise ValueError('Too many command observations; split the log')
-        observations.append({'record_key': key, 'line': start, 'end_line': line,
+        observations.append({'record_key': key, 'line': start, 'end_line': last if incomplete else line,
+                             'provider': 'claude' if pending is claude_pending else 'codex',
+                             'incomplete': incomplete,
                              'check_kind_hint': kind, 'command_family': preview, 'topic_tags': topic_tags,
                              'log_exit_code': code})
 
@@ -176,15 +265,18 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
                 truncated += 1
                 continue
             try:
-                e = json.loads(line)
+                e = strict_json_loads(line)
             except (UnicodeError, ValueError, RecursionError):
                 malformed += 1
                 continue
             if not isinstance(e, dict):
+                malformed += 1
                 continue
             t = e.get('type')
             if t in ('user', 'assistant') and isinstance(e.get('message'), dict):
                 counts['claude'] += 1
+                if provider not in ('auto', 'claude'):
+                    continue
                 if t == 'assistant':
                     for block in _claude_blocks(e):
                         if isinstance(block, dict) and block.get('type') == 'tool_use' and block.get('name') == 'Bash':
@@ -194,20 +286,59 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
                 else:
                     for block in _claude_blocks(e):
                         if isinstance(block, dict) and block.get('type') == 'tool_result':
-                            record(claude_pending, block.get('tool_use_id'),
-                                   _exit_from_claude_result(block, e.get('toolUseResult')), line_no)
+                            try:
+                                code = _exit_from_claude_result(block, e.get('toolUseResult'))
+                            except ValueError:
+                                malformed += 1
+                                continue
+                            record(claude_pending, block.get('tool_use_id'), code, line_no)
             elif t in ('response_item', 'event_msg', 'session_meta', 'item.started', 'item.completed', 'item.failed'):
                 counts['codex'] += 1
+                if provider not in ('auto', 'codex'):
+                    continue
                 payload = e.get('payload')
                 if t == 'response_item' and isinstance(payload, dict):
                     k = payload.get('type')
-                    if k in ('function_call', 'custom_tool_call') and payload.get('name') in ('exec_command', 'functions.execute', 'shell_command'):
-                        pending_set(codex_pending, payload.get('call_id'), _codex_command(payload), line_no)
+                    if k in ('function_call', 'custom_tool_call') and payload.get('name') in (
+                            'exec_command', 'functions.execute', 'shell_command', 'write_stdin', 'functions.write_stdin'):
+                        try:
+                            args = _codex_arguments(payload)
+                        except ValueError:
+                            malformed += 1
+                            continue
+                        key = payload.get('call_id')
+                        if payload.get('name') in ('write_stdin', 'functions.write_stdin'):
+                            original = sessions.get(_session_id(args.get('session_id')))
+                            if isinstance(key, str) and key and original in codex_pending:
+                                remember_call(codex_pending, key)
+                                if len(polls) >= MAX_PENDING:
+                                    raise ValueError('Too many pending session polls; split the log')
+                                polls[key] = original
+                        else:
+                            pending_set(codex_pending, key, _command(args.get('cmd') or args.get('command')), line_no)
                     elif k in ('function_call_output', 'custom_tool_call_output'):
-                        code = parse_exit(payload.get('exit_code'))
-                        if code is None:
-                            code = parse_exit(_safe_str(payload.get('output')))
-                        record(codex_pending, payload.get('call_id'), code, line_no)
+                        key = payload.get('call_id')
+                        if not isinstance(key, str):
+                            continue
+                        try:
+                            code, session = _codex_result(payload)
+                        except ValueError:
+                            malformed += 1
+                            continue
+                        key = polls.pop(key, key)
+                        if key not in codex_pending:
+                            continue
+                        if session or (code is None and key in sessions.values()):
+                            if session:
+                                if session in sessions and sessions[session] != key:
+                                    raise ValueError('Ambiguous running session ID')
+                                if key in sessions.values() and sessions.get(session) != key:
+                                    raise ValueError('Running session ID changed')
+                                sessions[session] = key
+                            cmd, start, _ = codex_pending[key]
+                            codex_pending[key] = (cmd, start, line_no)
+                        else:
+                            record(codex_pending, key, code, line_no)
                 elif t == 'event_msg' and isinstance(payload, dict) and payload.get('type') == 'item_completed':
                     item = payload.get('item')
                     if isinstance(item, dict) and str(item.get('type', '')).lower() in ('commandexecution', 'command_execution'):
@@ -215,9 +346,7 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
                         if cmd:
                             key = f'modern:{line_no}'
                             pending_set(codex_pending, key, cmd, line_no)
-                            code = parse_exit(item.get('exit_code', item.get('exitCode')))
-                            if code is None:
-                                code = parse_exit(_safe_str(item.get('aggregated_output')))
+                            code = _metadata_exit(item)
                             record(codex_pending, key, code, line_no)
                 elif t in ('item.started', 'item.completed', 'item.failed'):
                     item = e.get('item')
@@ -229,7 +358,7 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
                         else:
                             if key not in codex_pending and cmd:
                                 pending_set(codex_pending, key or f'item:{line_no}', cmd, line_no)
-                            code = parse_exit(item.get('exit_code', item.get('exitCode')))
+                            code = _metadata_exit(item)
                             # Failure event without an exit code is UNKNOWN rather than an invented OS exit.
                             record(codex_pending, key or f'item:{line_no}', code, line_no)
 
@@ -237,6 +366,13 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
         if (counts['codex'] > 0) == (counts['claude'] > 0):
             raise ValueError('Cannot uniquely infer provider; use --provider codex or claude')
         provider = 'codex' if counts['codex'] else 'claude'
+    elif not counts[provider] and any(counts.values()):
+        raise ValueError('Selected provider does not match transcript events')
+    # Keep incomplete executions visible, including calls that never returned.
+    unmatched = len(claude_pending) + len(codex_pending) + evicted
+    for pending in (claude_pending, codex_pending):
+        for key in list(pending):
+            record(pending, key, None, line_no, incomplete=True)
     # Older legacy and modern Codex receipts may mirror one execution. Retain both
     # as observations rather than accidentally merging distinct repeated commands.
     saved = core.read_json(root / IMPORTS, {'schema': 1, 'observations': [], 'sources': []})
@@ -246,10 +382,10 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
     source_digest = digest.hexdigest()
     added = []
     for row in observations:
-        uid = 'A' + hashlib.sha256(f"{provider}:{source_digest}:{row['record_key']}:{row['line']}".encode()).hexdigest()[:12]
+        uid = 'A' + hashlib.sha256(f"{row['provider']}:{source_digest}:{row['record_key']}:{row['line']}".encode()).hexdigest()[:12]
         if uid in old:
             continue
-        added.append({'id': uid, 'provider': provider,
+        added.append({'id': uid, 'provider': row['provider'], 'incomplete': row['incomplete'],
                       'command_family': row['command_family'], 'check_kind_hint': row['check_kind_hint'],
                       'topic_tags': row['topic_tags'],
                       'log_exit_code': row['log_exit_code'],
@@ -263,12 +399,12 @@ def import_log(root: Path, source_file: Path, provider: str = 'auto') -> dict:
     saved['observations'].extend(added)
     saved.setdefault('sources', []).append({'sha256': source_digest, 'provider': provider,
         'name': '[explicit local JSONL file]', 'skipped_oversize_lines': truncated,
-        'skipped_malformed_lines': malformed, 'unmatched_pending_calls': len(claude_pending if provider == 'claude' else codex_pending),
-        'evicted_pending_calls': ambiguous, 'no_raw_outputs_retained': True})
+        'skipped_malformed_lines': malformed, 'unmatched_pending_calls': unmatched,
+        'evicted_pending_calls': evicted, 'no_raw_outputs_retained': True})
     core.write_json(root / IMPORTS, saved)
     return {'provider': provider, 'new_observations': len(added),
             'total_observations': len(saved['observations']),
             'unknown_exits': sum(r['log_exit_code'] is None for r in added),
             'skipped_oversize_lines': truncated, 'skipped_malformed_lines': malformed,
-            'unmatched_pending_calls': len(claude_pending if provider == 'claude' else codex_pending),
+            'unmatched_pending_calls': unmatched, 'evicted_pending_calls': evicted,
             'note': 'Transcript is untrusted; imported records NEVER fulfill contracts.'}

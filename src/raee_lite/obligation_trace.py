@@ -15,6 +15,7 @@ _REMEDY = {
     "PARTIAL": "Review unhashed inputs and fingerprint limits before relying on this receipt.",
     "SCOPE_CONTEXT_REQUIRED": "Provide the current declared dependency paths and nonsecret external revisions; cannot implicitly reuse old labels.",
     "SCOPE_UNBOUND": "Old receipt lacks a scoped binding; rerun a scoped, explicitly labelled check.",
+    "INVALID_EVIDENCE": "Repair the malformed receipt and rerun the check; exit codes must be integers.",
     "SCOPE_INCOMPLETE": "Include the omitted local dependencies and rerun the check with the reviewed scope.",
     "SCOPE_AUDIT_UNCERTAIN": "Resolve dynamic imports, unreadable inputs or audit limits before reusing this receipt.",
     "SCOPE_DECLARATION_CHANGED": "Declared dependency set changed; review scope and rerun against the new set.",

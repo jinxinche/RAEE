@@ -4,15 +4,78 @@ from __future__ import annotations
 from pathlib import Path
 from . import core
 from .agent_logs import IMPORTS
+from .evidence_binding import evaluate_binding, evaluate_environment, valid_execution
 from .topic_tags import tags
 
 LINKS = Path('.raee/links.json')
 
 
+def _read_records(path: Path, field: str) -> dict:
+    store = core.read_json(path, {'schema': 1, field: []})
+    if (not isinstance(store, dict) or not isinstance(store.get(field), list) or
+            any(not isinstance(row, dict) for row in store[field])):
+        raise ValueError(f'Invalid {path.name}: expected an object with {field} records')
+    return store
+
+
+def _require_strings(row: dict, fields: tuple[str, ...], filename: str) -> None:
+    if any(not isinstance(row.get(key), str) or not row[key].strip() for key in fields):
+        raise ValueError(f'Invalid {filename}: missing or malformed record fields')
+
+
+def _read_links(root: Path) -> dict:
+    store = _read_records(root / LINKS, 'links')
+    for row in store['links']:
+        _require_strings(row, ('requirement', 'evidence_id', 'rationale'), LINKS.name)
+    return store
+
+
 def available_evidence(root: Path) -> dict[str, dict]:
-    manual = core.read_json(root / core.LEDGER, {'runs': []}).get('runs', [])
-    imported = core.read_json(root / IMPORTS, {'observations': []}).get('observations', [])
-    return {str(e['id']): e for e in manual + imported}
+    manual = core.read_json(root / core.LEDGER, {'schema': 1, 'runs': []}).get('runs', [])
+    imported = _read_records(root / IMPORTS, 'observations')['observations']
+    for row in imported:
+        _require_strings(row, ('id', 'provider', 'command_family', 'log_status'), IMPORTS.name)
+        if (row.get('provenance') != 'UNVERIFIED_AGENT_TRANSCRIPT' or
+                (row.get('check_kind_hint') is not None and not isinstance(row['check_kind_hint'], str)) or
+                not isinstance(row.get('topic_tags', []), list) or
+                any(not isinstance(tag, str) for tag in row.get('topic_tags', []))):
+            raise ValueError('Invalid imports.json: malformed transcript metadata')
+    evidence = {}
+    for row in manual + imported:
+        _require_strings(row, ('id',), 'evidence')
+        if row['id'] in evidence:
+            raise ValueError('Ambiguous evidence IDs')
+        evidence[row['id']] = row
+    return evidence
+
+
+def _linked_state(receipt: dict, source: dict, requirements: dict[str, dict]) -> str:
+    if receipt.get('provenance') == 'UNVERIFIED_AGENT_TRANSCRIPT':
+        return 'LOG_ONLY_NOT_VALIDATED'
+    if not valid_execution(receipt):
+        return 'INVALID_EVIDENCE'
+    if 'dependency_scope' in receipt:
+        return 'SCOPE_CONTEXT_REQUIRED' if isinstance(receipt['dependency_scope'], dict) else 'SCOPE_UNBOUND'
+    if (receipt.get('source_fingerprint') != source['sha256'] or
+            receipt.get('source_fingerprint_after') != receipt.get('source_fingerprint')):
+        return 'STALE'
+    if receipt.get('origin') == 'auto_discovered':
+        binding = evaluate_environment(receipt)
+    else:
+        # Attribution to another requirement does not replace the receipt's
+        # original intent binding or establish coverage of the linked target.
+        rid = receipt.get('requirement')
+        requirement = requirements.get(rid) if isinstance(rid, str) else None
+        if requirement is None:
+            return 'INTENT_UNBOUND'
+        binding = evaluate_binding(receipt, requirement['description'])
+    if binding != 'BINDING_MATCHED':
+        return binding
+    if receipt['observed_exit_code'] != 0:
+        return 'OBSERVED_FAILED_SELF_LINKED'
+    if receipt.get('files_skipped') or source.get('skipped'):
+        return 'PARTIAL_COVERAGE'
+    return 'OBSERVED_PASS_SELF_LINKED'
 
 
 def link_evidence(root: Path, requirement: str, evidence_id: str, reason: str) -> dict:
@@ -24,7 +87,7 @@ def link_evidence(root: Path, requirement: str, evidence_id: str, reason: str) -
         raise ValueError(f'Unknown evidence: {evidence_id}')
     if len(reason.strip()) < 8:
         raise ValueError('Provide a specific reason of at least 8 characters explaining relevance')
-    store = core.read_json(root / LINKS, {'schema': 1, 'links': []})
+    store = _read_links(root)
     record = {'requirement': requirement, 'evidence_id': evidence_id,
               'rationale': reason.strip()[:1000], 'created_at': core.utcnow(),
               'self_declared': True}
@@ -37,21 +100,15 @@ def link_evidence(root: Path, requirement: str, evidence_id: str, reason: str) -
 
 def build_associations(root: Path, source: dict) -> dict:
     reqs = core.get_manifest(root).get('requirements', [])
+    by_id = {r['id']: r for r in reqs}
     evidence = available_evidence(root)
-    links = core.read_json(root / LINKS, {'links': []}).get('links', [])
+    links = _read_links(root)['links']
     explicit = []
     for l in links:
         e = evidence.get(l.get('evidence_id'))
-        if not e or not any(r['id'] == l['requirement'] for r in reqs):
+        if not e or l['requirement'] not in by_id:
             continue
-        if e.get('provenance') == 'UNVERIFIED_AGENT_TRANSCRIPT':
-            state = 'LOG_ONLY_NOT_VALIDATED'
-        elif e.get('source_fingerprint') != source['sha256'] or e.get('source_fingerprint_after') != e.get('source_fingerprint'):
-            state = 'STALE'
-        elif e.get('observed_exit_code') == 0:
-            state = 'OBSERVED_PASS_SELF_LINKED'
-        else:
-            state = 'OBSERVED_FAILED_SELF_LINKED'
+        state = _linked_state(e, source, by_id)
         explicit.append({**l, 'state': state, 'basis': 'USER_ASSERTED_ASSOCIATION_NOT_COVERAGE_PROOF'})
     imported = [e for e in evidence.values() if e.get('provenance') == 'UNVERIFIED_AGENT_TRANSCRIPT']
     suggestions = []

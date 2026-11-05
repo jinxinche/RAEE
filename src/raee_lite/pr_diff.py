@@ -7,14 +7,15 @@ import json
 from pathlib import Path
 
 from . import core
-from .safe_io import write_text as atomic_text
+from .contracts import KINDS
+from .safe_io import write_text as atomic_text, read_bytes, strict_json_loads
 
 
 def load_report(path: Path) -> dict:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 8_000_000:
         raise ValueError('Report missing, symlink, or larger than 8 MB')
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
+        data = strict_json_loads(read_bytes(path, 8_000_000))
     except (ValueError, UnicodeError, RecursionError) as exc:
         raise ValueError('Invalid report encoding or JSON') from exc
     if not isinstance(data, dict) or data.get('tool') != 'RAEE-Lite' or not isinstance(data.get('requirements'), list):
@@ -33,52 +34,130 @@ def load_report(path: Path) -> dict:
         raise ValueError('Invalid source fingerprint')
     if not isinstance(data.get('git', {}), dict):
         raise ValueError('Invalid Git provenance in report')
+    _identities(data)
     return data
+
+
+def _identities(report: dict) -> tuple[dict, dict]:
+    """Validate identities before any ID lookup can discard conflicting rows."""
+    if report.get('overall') is not None and not isinstance(report['overall'], str):
+        raise ValueError('Invalid overall outcome in report')
+    requirements = {}
+    for row in report.get('requirements', []):
+        rid = row.get('id')
+        if not isinstance(rid, str) or not rid or not isinstance(row.get('requirement'), str):
+            raise ValueError('Invalid requirement identity in report')
+        if rid in requirements:
+            raise ValueError('Ambiguous duplicate requirement ID in report')
+        requirements[rid] = row
+    contracts = {}
+    for row in report.get('evidence_contracts', []):
+        rid = row.get('id')
+        if not isinstance(rid, str) or rid not in requirements:
+            raise ValueError('Evidence contract references an unknown requirement')
+        if rid in contracts:
+            raise ValueError('Ambiguous duplicate evidence contract in report')
+        description = requirements[rid]['requirement']
+        if row.get('requirement', description) != description:
+            raise ValueError('Evidence contract requirement text does not match its ID')
+        expected = row.get('expected_checks', [])
+        evidence = row.get('evidence_by_kind', [])
+        if (not isinstance(expected, list) or
+                any(not isinstance(kind, str) or kind not in KINDS for kind in expected) or
+                len(set(expected)) != len(expected) or not isinstance(evidence, list) or
+                any(not isinstance(item, dict) or not isinstance(item.get('kind'), str)
+                    for item in evidence)):
+            raise ValueError('Invalid evidence contract roles in report')
+        kinds = [item['kind'] for item in evidence]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError('Ambiguous duplicate evidence role in report')
+        if set(kinds) != set(expected):
+            raise ValueError('Evidence contract roles do not match required checks')
+        contracts[rid] = row
+    return requirements, contracts
 
 
 def _states(report: dict) -> dict:
     """Requirements matched by description, not unstable local R1/R2 identifiers."""
     matrix = {}
-    descriptions = {x.get('id'): x.get('requirement', '') for x in report.get('requirements', [])}
-    contracted = {r.get('id') for r in report.get('evidence_contracts', []) if r.get('expected_checks')}
-    for r in report.get('requirements', []):
-        # When contract scopes exist, avoid counting the same stale receipt twice.
-        if r.get('id') in contracted:
-            continue
-        key = (str(r.get('requirement', '')).strip().casefold(), 'requirement')
-        matrix[key] = str(r.get('state', 'UNKNOWN'))
+    def add(key, state):
+        if key in matrix:
+            raise ValueError('Ambiguous duplicate evidence role in report')
+        matrix[key] = state
+    requirements, contracts = _identities(report)
+    for r in requirements.values():
+        key = (r['requirement'], 'requirement')
+        add(key, str(r.get('state', 'UNKNOWN')))
     for row in report.get('automatic_checks', []):
-        matrix[(str(row.get('id', row.get('kind','?'))).casefold(), 'autocheck')] = str(row.get('state','UNKNOWN'))
-    for row in report.get('evidence_contracts', []):
-        descr = str(row.get('requirement') or descriptions.get(row.get('id'), '')).strip().casefold()
+        add((str(row.get('id', row.get('kind','?'))), 'autocheck'), str(row.get('state','UNKNOWN')))
+    for rid, row in contracts.items():
+        descr = requirements[rid]['requirement']
         for e in row.get('evidence_by_kind', []):
-            matrix[(descr, str(e.get('kind', 'unknown')))] = str(e.get('state', 'UNKNOWN'))
+            add((descr, str(e.get('kind', 'unknown'))), str(e.get('state', 'UNKNOWN')))
     return matrix
 
 
 PASS = {'OBSERVED_PASS', 'CHECKS_PASSED_WITH_LIMITS', 'RECORDED'}
 RISK = {'FAILED', 'FAILED_CHECK', 'STALE', 'UNTESTED', 'MISSING', 'PARTIAL', 'PARTIAL_COVERAGE', 'UNKNOWN'}
+OVERALL_PASS = PASS | {'AUTOCHECKS_PASSED_WITH_LIMITS'}
+
+
+def _classification(before, after, passing=PASS) -> str:
+    if before is None:
+        return 'ADDED'
+    if after is None:
+        return 'REMOVED_VERIFIED_EVIDENCE' if before in passing else 'REMOVED_UNVERIFIED'
+    if before in passing and after not in passing:
+        return 'REGRESSION'
+    if before not in passing and after in passing:
+        return 'IMPROVED_OBSERVATION'
+    return 'CHANGED_REVIEW'
+
+
+def _signal(state):
+    """Equivalent requirement/contract labels for the same observed outcome."""
+    for group in (PASS, {'FAILED', 'FAILED_CHECK'}, {'STALE', 'STALE_EVIDENCE'},
+                  {'PARTIAL', 'PARTIAL_COVERAGE'}, {'UNTESTED', 'MISSING', 'NOT_RUN'}):
+        if state in group:
+            return frozenset(group)
+    return state
 
 
 def compare_reports(base: dict, head: dict) -> dict:
     b, h = _states(base), _states(head)
+    base_requirements, base_contracts = _identities(base)
+    head_requirements, head_contracts = _identities(head)
+    verified = {row['requirement'] for rid, row in base_requirements.items()
+                if str(row.get('state', 'UNKNOWN')) in PASS and all(
+                    str(e.get('state', 'UNKNOWN')) in PASS
+                    for e in base_contracts.get(rid, {}).get('evidence_by_kind', []))}
+    required = {(head_requirements[rid]['requirement'], kind)
+                for rid, row in head_contracts.items() for kind in row.get('expected_checks', [])}
     changes = []
     for key in sorted(b.keys() | h.keys()):
         before, after = b.get(key), h.get(key)
         if before == after:
             continue
-        if before is None:
-            classification = 'ADDED'
-        elif after is None:
-            classification = 'REMOVED_VERIFIED_EVIDENCE' if before in PASS else 'REMOVED_UNVERIFIED'
-        elif before in PASS and after not in PASS:
+        classification = _classification(before, after)
+        if before is None and key in required and key[0] in verified and after not in PASS:
             classification = 'REGRESSION'
-        elif before not in PASS and after in PASS:
-            classification = 'IMPROVED_OBSERVATION'
-        else:
-            classification = 'CHANGED_REVIEW'
         changes.append({'requirement': key[0], 'kind': key[1], 'base': before,
                         'head': after, 'classification': classification})
+    # Deduplicate only an equivalent transition for this same requirement.
+    # A still-passing contract must never hide a newer, differently scoped failure.
+    scoped = {(x['requirement'], _signal(x['head']), x['classification'])
+              for x in changes if x['kind'] in KINDS}
+    changes = [x for x in changes if x['kind'] != 'requirement' or
+               (x['requirement'], _signal(x['head']), x['classification']) not in scoped]
+    before, after = base.get('overall'), head.get('overall')
+    if before is not None and after is not None and before != after:
+        classification = _classification(before, after, OVERALL_PASS)
+        if classification == 'REGRESSION' and any(
+                x['classification'] in ('REGRESSION', 'REMOVED_VERIFIED_EVIDENCE') for x in changes):
+            # Preserve the overall downgrade without counting its underlying signals twice.
+            classification = 'CHANGED_REVIEW'
+        changes.append({'requirement': 'Overall outcome', 'kind': 'overall',
+                        'base': before, 'head': after, 'classification': classification})
     old_imports = len(base.get('agent_evidence', {}).get('imported', []))
     new_imports = len(head.get('agent_evidence', {}).get('imported', []))
     return {'tool': 'RAEE-Lite PR evidence diff', 'version': '0.5.0',

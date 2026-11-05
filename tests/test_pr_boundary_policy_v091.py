@@ -71,6 +71,6 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn('pull_request:',trusted)
         self.assertNotIn('pull_request:',tests)
         self.assertIn('windows-latest',tests)
-        self.assertIn('macos-latest',tests)
+        self.assertIn('macos-15-intel',tests)
 
 if __name__=='__main__': unittest.main()

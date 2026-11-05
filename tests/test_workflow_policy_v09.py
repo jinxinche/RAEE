@@ -38,13 +38,19 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn('pull_request_target:',s)
         self.assertIn('ubuntu-latest',s)
         self.assertIn('windows-latest',s)
-        self.assertIn('macos-latest',s)
-        self.assertIn('python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules',s)
+        self.assertIn('macos-15-intel',s)
+        self.assertIn('python scripts/run_reviewed_suite.py --require-critical-modules',s)
         self.assertIn("python-version: ['3.10', '3.15']",s)
         self.assertIn('TMPDIR: ${{ runner.temp }}',s)
         self.assertIn('python scripts/local_pr_attack_smoke.py',s)
         self.assertIn("if: matrix.os == 'ubuntu-latest'",s)
         self.assertIn('validate-corpus',s)
+        self.assertIn('--require-exact', s)
+        self.assertIn('--summary test-results/summary.json', s)
+        self.assertIn("branches: [main, 'maintenance/**']", s)
+        for version in ('3.11', '3.12', '3.13', '3.14'):
+            self.assertIn("python-version: '" + version + "'", s)
+        self.assertIn('architecture: arm64', s)
         self.assertNotIn('raee-lite check --ci',s)
 
     def test_full_regression_workflows_install_attestation_extra(self):
@@ -54,6 +60,7 @@ class WorkflowPolicy(unittest.TestCase):
                 text = (ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
                 self.assertIn('".[attest]"', text)
                 self.assertIn('--require-critical-modules', text)
+                self.assertNotIn('--min-tests', text)
 
     def test_dependency_matrix_retains_versions_architectures_and_final_gate(self):
         text = (ROOT / '.github/workflows/experimental-dependency-completeness.yml').read_text(encoding='utf-8')

@@ -4,7 +4,7 @@
 
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**Öffentlicher Quellcode-Kandidat:** [v0.10.0rc2 Branch](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) · [Review-PR #2](https://github.com/jinxinche/RAEE/pull/2). Dieses Repository enthält den CLI-Quellcode und die Installationskonfiguration. Keine stabile Veröffentlichung, keine PyPI-Publikation und keine unabhängig verifizierte Cloud-Attestierung. In einer isolierten Umgebung können Sie `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` und `raee-lite status` ausprobieren. Erwartet: `UNTESTED`. Rückgabecode 1 von `status` meldet die Evidenzlücke und ist kein Absturz. Standardmäßig werden keine Projekttests ausgeführt.
+**Öffentlicher Quellcode-Kandidat:** [Quellcode auf main](https://github.com/jinxinche/RAEE/tree/main) · [Zusammengeführter PR #2](https://github.com/jinxinche/RAEE/pull/2) · [Audit und Validierungsstand vom 05.11.2026](ENGINEERING_AUDIT_2026-11-05.md). Dieses Repository enthält den CLI-Quellcode und die Installationskonfiguration. Keine stabile Veröffentlichung, keine PyPI-Publikation und keine unabhängig verifizierte Cloud-Attestierung. In einer isolierten Umgebung können Sie `raee-lite init`, `raee-lite add "Signup rejects invalid email addresses"`, `raee-lite expect --for R1 --kind unit` und `raee-lite status` ausprobieren. Erwartet: `UNTESTED`. Rückgabecode 1 von `status` meldet die Evidenzlücke und ist kein Absturz. Standardmäßig werden keine Projekttests ausgeführt.
 
 
 ## Wozu RAEE-Lite?

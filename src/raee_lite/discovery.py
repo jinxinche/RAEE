@@ -9,6 +9,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from .safe_io import read_bytes, strict_json_loads
+from .safe_process import capture_bounded
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,7 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
         try:
             if package_json.stat().st_size > 1_000_000:
                 raise ValueError('package.json exceeds discovery size limit')
-            pkg = json.loads(package_json.read_text(encoding="utf-8"))
+            pkg = strict_json_loads(read_bytes(package_json, 1_000_000))
             if not isinstance(pkg, dict):
                 raise ValueError('package.json must contain an object')
             scripts = pkg.get("scripts", {})
@@ -80,9 +82,10 @@ def discover(root: Path) -> tuple[list[Check], list[str]]:
 def risk_signals(root: Path) -> list[dict]:
     """Potential high-impact paths changed in git, not security verdicts."""
     from .core import git_context
+    from .safe_process import git_metadata_command
     ctx = git_context(root)
     if not ctx.get("available"):
-        return [{"level": "info", "reason": "No Git baseline available; changed-file risk scan unavailable", "paths": []}]
+        return [{"level": "info", "reason": ctx.get('reason') or "No Git baseline available; changed-file risk scan unavailable", "paths": []}]
     patterns = {
         "modified_tests": re.compile(r"(^|/)(tests?/|__tests__/|[^/]*\.test\.|[^/]*_test\.)", re.I),
         "auth_or_permissions": re.compile(r"(^|/)(auth|login|session|permission|access|roles?)(/|\.|$)", re.I),
@@ -104,11 +107,18 @@ def risk_signals(root: Path) -> list[dict]:
                       and not p.startswith("-") and not p.startswith(".raee/")][:40]
         if test_paths:
             try:
-                diff = subprocess.run(
-                    [git, "diff", "HEAD", "--no-ext-diff", "--unified=0", "--", *test_paths],
-                    cwd=root, capture_output=True, check=False, timeout=15,
+                command = [git, '--no-optional-locks', '-c', 'core.fsmonitor=false']
+                command = git_metadata_command(command, root)
+                if command is None:
+                    found.append({'level': 'info', 'reason': 'git_filter_config_unavailable', 'paths': []})
+                    return found
+                code, raw, truncated = capture_bounded(
+                    [*command, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--unified=0", "--", *test_paths],
+                    root,
                 )
-                lines = diff.stdout[:250_000].decode("utf-8", errors="replace").splitlines()
+                if code and not truncated:
+                    raise ValueError('Git diff unavailable')
+                lines = raw.decode("utf-8", errors="replace").splitlines()
                 added_skips = []
                 removed_asserts = []
                 for line in lines:
@@ -125,9 +135,9 @@ def risk_signals(root: Path) -> list[dict]:
                 if removed_asserts:
                     found.append({"level": "review", "reason": "removed_test_assertions", "paths": test_paths[:20],
                                   "note": "Possible weakening: assertion lines removed in tracked tests."})
-                if len(diff.stdout) > 250_000:
+                if truncated:
                     found.append({"level": "info", "reason": "test_diff_truncated", "paths": []})
-            except (OSError, subprocess.TimeoutExpired):
+            except (OSError, ValueError, subprocess.TimeoutExpired):
                 found.append({"level": "info", "reason": "test_diff_scan_unavailable", "paths": []})
     if ctx.get("changed_paths_truncated"):
         found.append({"level": "info", "reason": "Changed path listing truncated", "paths": []})

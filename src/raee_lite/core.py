@@ -9,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import time
-from .safe_io import safe_read_json, write_json as atomic_json
-from .evidence_binding import intent_digest
+from .safe_io import safe_read_json, write_json as atomic_json, read_bytes, write_text as atomic_text
+from .safe_io import exclusive_lock, bounded_walk
+from .evidence_binding import intent_digest, evaluate_binding, valid_execution
 from .dependency_scope import snapshot as declared_dependency_snapshot
-from .safe_process import run as bounded_run
+from .dependency_audit import audit_local_python_scope
+from .safe_process import run as bounded_run, capture_bounded
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,8 +27,12 @@ EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 MAX_FILE_BYTES = 5_000_000
 MAX_FILES = 5_000
 MAX_HASH_BYTES = 64_000_000
+MAX_SCAN_ENTRIES = 10_000
+MAX_SCAN_DIRECTORIES = 5_000
+MAX_RUNS = 2_000
 MANIFEST = Path(".raee") / "manifest.json"
 LEDGER = Path(".raee") / "ledger.json"
+LEDGER_LOCK = Path(".raee") / "ledger.lock"
 
 
 def utcnow() -> str:
@@ -35,9 +41,11 @@ def utcnow() -> str:
 
 def read_json(path: Path, default=None):
     result = safe_read_json(path, default)
-    if path.name == 'ledger.json' and isinstance(result, dict):
+    if path.name == 'ledger.json' and result is not None:
+        if not isinstance(result, dict) or result.get('schema') != 1:
+            raise ValueError('Invalid evidence ledger schema')
         entries = result.get('runs', [])
-        if not isinstance(entries, list) or len(entries) > 2000 or any(not isinstance(x, dict) for x in entries):
+        if not isinstance(entries, list) or len(entries) > MAX_RUNS or any(not isinstance(x, dict) for x in entries):
             raise ValueError('Invalid or oversized local evidence ledger (max 2,000 runs)')
     return result
 
@@ -46,69 +54,71 @@ def write_json(path: Path, obj) -> None:
     atomic_json(path, obj)
 
 
+def append_receipt(root: Path, entry: dict, *, lock_timeout: float = 5.0) -> dict:
+    """Commit one receipt without overwriting another cooperating writer."""
+    with exclusive_lock(root / LEDGER_LOCK, timeout=lock_timeout):
+        ledger = read_json(root / LEDGER, {"schema": 1, "runs": []})
+        runs = ledger.setdefault('runs', [])
+        if len(runs) >= MAX_RUNS:
+            raise ValueError('Evidence ledger limit reached; archive before recording another check')
+        existing = {r['id'] for r in runs if isinstance(r.get('id'), str)}
+        index = len(runs) + 1
+        while f'E{index}' in existing:
+            index += 1
+        saved = {**entry, 'id': f'E{index}'}
+        runs.append(saved)
+        # The JSON byte cap is checked before atomically replacing the ledger.
+        write_json(root / LEDGER, ledger)
+        return saved
+
+
 def paths(root: Path) -> list[Path]:
     """Bounded source enumeration: at most MAX_FILES+1 paths in memory.
 
-    The extra sentinel marks incomplete enumeration instead of silently claiming
-    all source files were fingerprinted. Git-ignored inputs are NOT inspected.
+    The extra real path marks the file-count limit. The list-compatible result
+    separately records Git output truncation, independent of any disk filename.
+    Git-ignored inputs are NOT inspected.
     """
+    class Inventory(list):
+        enumeration_truncated = False
+
     git = shutil.which('git')
     if git and (root / '.git').exists():
-        proc = None
-        out = []
-        partial = bytearray()
         try:
-            proc = subprocess.Popen([git, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-                                    cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            assert proc.stdout is not None
-            while len(out) <= MAX_FILES:
-                data = proc.stdout.read(65536)
-                if not data:
-                    break
-                partial.extend(data)
-                while b'\x00' in partial:
-                    raw, _, tail = partial.partition(b'\x00')
-                    partial = bytearray(tail)
-                    if not raw:
+            code, raw, truncated = capture_bounded(
+                [git, '--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-files',
+                 '--cached', '--others', '--exclude-standard', '-z'], root, limit=8_000_000)
+            if code == 0 or truncated:
+                out = []
+                start = 0
+                while (end := raw.find(b'\x00', start)) >= 0:
+                    name = raw[start:end]
+                    start = end + 1
+                    p = Path(os.fsdecode(name))
+                    if (not name or p.is_absolute() or '..' in p.parts or
+                            any(v in EXCLUDE_DIRS for v in p.parts) or p.suffix in EXCLUDE_SUFFIXES):
                         continue
-                    p = Path(os.fsdecode(bytes(raw)))
-                    if (p.is_absolute() or '..' in p.parts or any(v in EXCLUDE_DIRS for v in p.parts)
-                        or p.suffix in EXCLUDE_SUFFIXES):
-                        continue
-                    path = root / p
-                    if path.is_file() and not path.is_symlink():
-                        out.append(path)
-                        if len(out) > MAX_FILES:
-                            break
-                if len(partial) > 1_000_000:
-                    out.append(root / '.raee-enumeration-overflow')
-                    break
-            if len(out) > MAX_FILES:
-                proc.kill()
-                proc.wait(timeout=10)
-                return sorted(out, key=lambda v: v.as_posix())
-            return_code = proc.wait(timeout=15)
-            if return_code == 0:
-                return sorted(out, key=lambda v: v.as_posix())
-        except (OSError, subprocess.TimeoutExpired):
+                    out.append(root / p)
+                    if len(out) > MAX_FILES:
+                        break
+                result = Inventory(sorted(out, key=lambda v: v.as_posix()))
+                result.enumeration_truncated = truncated
+                return result
+        except (OSError, ValueError, subprocess.TimeoutExpired):
             pass
-        finally:
-            if proc is not None:
-                if proc.poll() is None:
-                    proc.kill()
-                    proc.wait()
-                if proc.stdout is not None:
-                    proc.stdout.close()
     out = []
-    for folder, directories, filenames in os.walk(root, followlinks=False):
-        directories[:] = [d for d in directories if d not in EXCLUDE_DIRS and not (Path(folder) / d).is_symlink()]
+    for folder, directories, filenames in bounded_walk(
+            root, max_entries=MAX_SCAN_ENTRIES, max_directories=MAX_SCAN_DIRECTORIES,
+            exclude_dirs=EXCLUDE_DIRS):
         for filename in filenames:
+            if filename in EXCLUDE_DIRS and (folder / filename).is_symlink():
+                continue
             p = Path(folder) / filename
-            if p.suffix not in EXCLUDE_SUFFIXES and not p.is_symlink():
+            if p.suffix not in EXCLUDE_SUFFIXES:
                 out.append(p)
                 if len(out) > MAX_FILES:
-                    return sorted(out, key=lambda v: v.as_posix())
-    return sorted(out, key=lambda v: v.as_posix())
+                    return Inventory(sorted(out, key=lambda v: v.as_posix()))
+    return Inventory(sorted(out, key=lambda v: v.as_posix()))
 
 
 def fingerprint(root: Path) -> dict:
@@ -116,6 +126,8 @@ def fingerprint(root: Path) -> dict:
     digest = hashlib.sha256()
     skipped = []
     files = paths(root)
+    if getattr(files, 'enumeration_truncated', False):
+        skipped.append({'file': '.', 'reason': 'enumeration_truncated'})
     hashed_bytes = 0
     for i, file in enumerate(files):
         relative = file.relative_to(root).as_posix()
@@ -123,16 +135,16 @@ def fingerprint(root: Path) -> dict:
             skipped.append({"file": relative, "reason": "file_count_limit"})
             continue
         try:
-            n = file.stat().st_size
+            n = file.lstat().st_size
             if n > MAX_FILE_BYTES:
                 skipped.append({"file": relative, "reason": "file_size_limit", "bytes": n})
                 continue
             if hashed_bytes + n > MAX_HASH_BYTES:
                 skipped.append({"file": relative, "reason": "total_hash_byte_budget", "bytes": n})
                 continue
-            contents = file.read_bytes()
+            contents = read_bytes(file, min(MAX_FILE_BYTES, MAX_HASH_BYTES - hashed_bytes))
             hashed_bytes += len(contents)
-        except OSError:
+        except (OSError, ValueError):
             skipped.append({"file": relative, "reason": "unreadable"})
             continue
         digest.update(relative.encode("utf-8", errors="replace") + b"\x00")
@@ -144,15 +156,25 @@ def fingerprint(root: Path) -> dict:
 
 
 def git_context(root: Path) -> dict:
+    from .safe_process import git_metadata_command
+
     git = shutil.which("git")
     if not git or not (root / ".git").exists():
         return {"available": False}
-    head = subprocess.run([git, "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=False, timeout=15)
-    status = subprocess.run([git, "status", "--porcelain", "--untracked-files=normal"], cwd=root, capture_output=True, text=True, check=False, timeout=15)
-    return {"available": head.returncode == 0 and status.returncode == 0,
-            "head": head.stdout.strip() if head.returncode == 0 else None,
-            "changed_paths": status.stdout.splitlines()[:200] if status.returncode == 0 else [],
-            "changed_paths_truncated": len(status.stdout.splitlines()) > 200}
+    command = [git, '--no-optional-locks', '-c', 'core.fsmonitor=false']
+    try:
+        command = git_metadata_command(command, root)
+        if command is None:
+            return {'available': False, 'reason': 'git_filter_config_unavailable'}
+        head_code, head, _ = capture_bounded([*command, "rev-parse", "HEAD"], root, limit=128)
+        status_code, status, truncated = capture_bounded([*command, "status", "--porcelain", "--untracked-files=normal"], root)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {"available": False}
+    lines = status.decode('utf-8', errors='replace').splitlines()
+    return {"available": head_code == 0 and (status_code == 0 or truncated),
+            "head": head.decode('ascii', errors='replace').strip() if head_code == 0 else None,
+            "changed_paths": lines[:200] if status_code == 0 or truncated else [],
+            "changed_paths_truncated": truncated or len(lines) > 200}
 
 
 def get_manifest(root: Path) -> dict:
@@ -168,6 +190,9 @@ def get_manifest(root: Path) -> dict:
                 or not isinstance(r.get('expected_checks', []), list)
                 or len(r.get('expected_checks', [])) > 8 for r in reqs)):
         raise ValueError('Malformed or oversized manifest (max 500 requirements)')
+    if len({r['id'] for r in reqs}) != len(reqs) or any(
+            not r['id'] or any(not isinstance(kind, str) for kind in r.get('expected_checks', [])) for r in reqs):
+        raise ValueError('Ambiguous requirement IDs or invalid check roles')
     return m
 
 
@@ -189,8 +214,10 @@ def init(root: Path) -> str:
 
 def add_requirement(root: Path, description: str) -> str:
     m = get_manifest(root)
-    if not description.strip():
-        raise ValueError("Requirement cannot be empty")
+    if not isinstance(description, str) or not description.strip() or len(description) > 5000:
+        raise ValueError("Requirement must contain 1..5000 characters")
+    if len(m.get('requirements', [])) >= 500:
+        raise ValueError('Requirement limit reached (500)')
     existing = {r["id"] for r in m.get("requirements", [])}
     idx = 1
     while f"R{idx}" in existing:
@@ -203,8 +230,10 @@ def add_requirement(root: Path, description: str) -> str:
 
 def add_boundary(root: Path, description: str) -> None:
     m = get_manifest(root)
-    if not description.strip():
-        raise ValueError("Boundary cannot be empty")
+    if not isinstance(description, str) or not description.strip() or len(description) > 5000:
+        raise ValueError("Boundary must contain 1..5000 characters")
+    if len(m.get('boundaries', [])) >= 2000:
+        raise ValueError('Boundary limit reached (2000)')
     m.setdefault("boundaries", []).append(description.strip())
     write_json(root / MANIFEST, m)
 
@@ -225,11 +254,14 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
     if timeout <= 0:
         raise ValueError("Timeout must be positive")
     ledger = read_json(root / LEDGER, {"schema": 1, "runs": []})
+    if len(ledger['runs']) >= MAX_RUNS:
+        raise ValueError('Evidence ledger limit reached; archive it before executing another check')
     if external_revisions is not None and dependency_files is None:
         raise ValueError("External revisions require explicit dependency files")
     before = fingerprint(root)
     scoped_before = (declared_dependency_snapshot(root, dependency_files, external_revisions)
                      if dependency_files is not None else None)
+    audit_before = audit_local_python_scope(root, dependency_files) if scoped_before is not None else None
     code, exception_text, duration = bounded_run(command, root, timeout)
     out_hash, err_hash = None, None  # no raw terminal output read, even transiently
     after = fingerprint(root)
@@ -242,7 +274,7 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
             # Retain its process receipt but refuse to carry over the binding.
             scoped_after = {"state": "UNAVAILABLE_AFTER_EXECUTION"}
     entry = {
-        "id": f"E{len(ledger['runs']) + 1}", "role": "verification",
+        "role": "verification",
         "requirement": requirement, "requirement_digest": intent_digest(next(r["description"] for r in m["requirements"] if r["id"] == requirement)), "command": ["[explicit command redacted]"],
         "command_sha256": hashlib.sha256(json.dumps(command).encode('utf-8')).hexdigest(),
         "declared_kind": kind,
@@ -258,10 +290,13 @@ def run_check(root: Path, requirement: str, command: list[str], timeout: int, ki
         "change": git_context(root),
     }
     if scoped_before is not None:
-        entry["dependency_scope"] = {"before": scoped_before, "after": scoped_after}
-    ledger["runs"].append(entry)
-    write_json(root / LEDGER, ledger)
-    return entry
+        try:
+            audit_after = audit_local_python_scope(root, dependency_files)
+        except (OSError, ValueError, TypeError, RecursionError):
+            audit_after = {'limitations': ['UNAVAILABLE_AFTER_EXECUTION']}
+        entry["dependency_scope"] = {"before": scoped_before, "after": scoped_after,
+                                     "audit_before": audit_before, "audit_after": audit_after}
+    return append_receipt(root, entry)
 
 
 def audit(root: Path) -> dict:
@@ -270,24 +305,31 @@ def audit(root: Path) -> dict:
     current = fingerprint(root)
     results = []
     for r in m.get("requirements", []):
-        matching = [e for e in ledger["runs"] if e.get("requirement") == r["id"]]
+        matching = [e for e in ledger["runs"] if e.get("requirement") == r["id"] and e.get('origin') != 'auto_discovered']
         if not matching:
             state, evidence = "UNTESTED", None
         else:
             evidence = matching[-1]
-            if (evidence["source_fingerprint"] != current["sha256"] or
+            binding = evaluate_binding(evidence, r['description'])
+            if not valid_execution(evidence):
+                state = 'INVALID_EVIDENCE'
+            elif 'dependency_scope' in evidence:
+                state = 'SCOPE_CONTEXT_REQUIRED' if isinstance(evidence['dependency_scope'], dict) else 'SCOPE_UNBOUND'
+            elif (evidence.get("source_fingerprint") != current["sha256"] or
                     evidence.get("source_fingerprint_after") != evidence["source_fingerprint"]):
                 state = "STALE"
             elif evidence.get("files_skipped") or current["skipped"]:
                 state = "PARTIAL_COVERAGE" if evidence["observed_exit_code"] == 0 else "FAILED_CHECK"
+            elif binding != 'BINDING_MATCHED':
+                state = binding
             elif evidence["observed_exit_code"] == 0:
                 state = "OBSERVED_PASS"
             else:
                 state = "FAILED_CHECK"
         results.append({"id": r["id"], "requirement": r["description"], "state": state,
-                        "evidence_id": evidence["id"] if evidence else None,
-                        "command": evidence["command"] if evidence else None,
-                        "exit_code": evidence["observed_exit_code"] if evidence else None})
+                        "evidence_id": evidence.get("id") if evidence else None,
+                        "command": evidence.get("command") if evidence else None,
+                        "exit_code": evidence.get("observed_exit_code") if evidence else None})
     states = [r["state"] for r in results]
     if not results:
         overall = "INSUFFICIENT_EVIDENCE"
@@ -295,7 +337,7 @@ def audit(root: Path) -> dict:
         overall = "FAILED_CHECK"
     elif "STALE" in states:
         overall = "STALE_EVIDENCE"
-    elif "UNTESTED" in states or "PARTIAL_COVERAGE" in states:
+    elif any(state != 'OBSERVED_PASS' for state in states):
         overall = "INSUFFICIENT_EVIDENCE"
     else:
         overall = "CHECKS_PASSED_WITH_LIMITS"
@@ -341,5 +383,5 @@ def markdown(report: dict) -> str:
 def save_report(root: Path) -> dict:
     report = audit(root)
     write_json(root / ".raee" / "report.json", report)
-    (root / ".raee" / "report.md").write_text(markdown(report), encoding="utf-8")
+    atomic_text(root / ".raee" / "report.md", markdown(report))
     return report

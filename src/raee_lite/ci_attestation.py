@@ -8,17 +8,17 @@ A valid attestation proves artifact origin/integrity, NOT that its claims are tr
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Mapping
 
 from . import core
 from .attestation import _file as bounded_file
-from .safe_io import write_json
+from .safe_io import strict_json_loads, write_json
 
 REPO = re.compile(r'^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$')
 SHA = re.compile(r'^[0-9a-f]{40}(?:[0-9a-f]{24})?$')
@@ -68,8 +68,8 @@ def _assert(value: str, pattern: re.Pattern, name: str) -> str:
 def _obj_file(path: Path, max_size: int) -> tuple[dict, bytes]:
     raw = bounded_file(path, max_size)
     try:
-        value = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        value = strict_json_loads(raw)
+    except ValueError as exc:
         raise ValueError('Invalid evidence JSON') from exc
     if not isinstance(value, dict):
         raise ValueError('Evidence JSON must be an object')
@@ -158,6 +158,9 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
 
     No OIDC JWT is accepted as proof, no self-declared fields grant trust, no
     shell and no automatic network downloads. Missing CLI => FAIL CLOSED.
+    Verification uses a private read-only copy of the exact parsed bytes, not
+    the caller's mutable path. The local host and gh installation remain trusted.
+    Run ID/attempt and event identity are not independently verified.
     """
     repo = _assert(expected_repo, REPO, 'repository')
     ref = _assert(expected_ref, REF, 'source ref')
@@ -165,7 +168,7 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     workflow = _assert(expected_workflow, WORKFLOW, 'workflow path')
     if timeout <= 0 or timeout > 300:
         raise ValueError('Verifier timeout must be between 1 and 300 seconds')
-    manifest, _ = _obj_file(manifest_path, MAX_MANIFEST)
+    manifest, manifest_raw = _obj_file(manifest_path, MAX_MANIFEST)
     if manifest.get('schema') != SCHEMA:
         raise ValueError('Unsupported CI evidence schema')
     source = manifest.get('source')
@@ -193,12 +196,20 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     if not gh:
         raise ValueError('GitHub CLI (gh) is required for authenticated CI provenance verification')
     require_safe_gh(gh, timeout=min(timeout, 10))
-    args = [gh, 'attestation', 'verify', str(manifest_path),
-            '--repo', repo, '--signer-workflow', f'{repo}/{workflow}',
-            '--source-digest', sha, '--source-ref', ref,
-            '--deny-self-hosted-runners', '--format', 'json']
     try:
-        completed = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+        # gh reopens its input path. Keep its subject identical to the bytes
+        # parsed above even if the caller's file is replaced in the meantime.
+        # TemporaryDirectory is private; this is not isolation from a hostile
+        # process with the verifier's own privileges.
+        with tempfile.TemporaryDirectory(prefix='raee-ci-verify-') as directory:
+            subject = Path(directory) / 'ci-evidence.json'
+            subject.write_bytes(manifest_raw)
+            subject.chmod(0o400)
+            args = [gh, 'attestation', 'verify', str(subject),
+                    '--repo', repo, '--signer-workflow', f'{repo}/{workflow}',
+                    '--source-digest', sha, '--source-ref', ref,
+                    '--deny-self-hosted-runners', '--format', 'json']
+            completed = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError('Official GitHub attestation verification unavailable or timed out') from exc
     if completed.returncode != 0:
@@ -207,13 +218,20 @@ def verify(manifest_path: Path, *, expected_repo: str, expected_ref: str,
     if len(completed.stdout) > MAX_VERIFIER_OUT:
         raise ValueError('GitHub verification response exceeds limit')
     try:
-        rows = json.loads(completed.stdout)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        rows = strict_json_loads(completed.stdout)
+    except ValueError as exc:
         raise ValueError('Invalid GitHub verification response') from exc
     if not isinstance(rows, list) or not rows:
         raise ValueError('GitHub verifier did not return a verified attestation')
     return {'result': 'GITHUB_ATTESTATION_VERIFIED', 'repository': repo, 'commit': sha,
             'ref': ref, 'signer_workflow': f'{repo}/{workflow}',
+            'manifest_sha256': hashlib.sha256(manifest_raw).hexdigest(),
             'report_sha256': report['sha256'], 'report_content_checked': report_path is not None,
+            'report_outcome': report.get('outcome'),
+            'strict_check_passed': report.get('strict_check_passed'),
+            'require_passed': require_passed,
+            'claimed_run_id': origin['run_id'], 'run_identity_verified': False,
             'verified_attestations': len(rows), 'code_correctness_proven': False,
-            'notice': 'Verified CI provenance does not prove test quality, isolation or code correctness.'}
+            'notice': 'Verified CI provenance does not prove test quality, isolation or code correctness. '
+                      'Report outcome and strict-check status are signed claims. '
+                      'Run ID/attempt and event identity are not independently verified.'}

@@ -132,6 +132,86 @@ class CompletenessAuditTests(unittest.TestCase):
         self.write("app.py", "from importlib import import_module as load\nload('hidden')\n")
         self.assertIn("DYNAMIC_EXECUTION_OR_IMPORT:app.py", self.audit()["limitations"])
 
+    def test_dynamic_function_references_remain_uncertain(self):
+        for source in (
+            "import importlib\nload = importlib.import_module\nload('hidden')\n",
+            "import importlib as imports\ncallback = imports.import_module\n",
+            "load = __import__\nload('hidden')\n",
+            "import builtins\ncallbacks = [builtins.exec, builtins.eval]\n",
+            "def run(callback=eval):\n    return callback('1')\n",
+        ):
+            with self.subTest(source=source):
+                self.write("app.py", source)
+                result = self.audit()
+                self.assertIn("DYNAMIC_EXECUTION_OR_IMPORT:app.py", result["limitations"])
+                self.assertFalse(result["dependency_completeness_proven"])
+
+    def test_dynamic_names_in_strings_and_assignment_targets_are_not_references(self):
+        self.write("app.py", "import_module = '__import__'\ntext = 'exec eval'\n")
+        self.assertEqual(self.audit()["limitations"], [])
+
+    def test_script_sibling_and_transitive_imports_detected(self):
+        self.write("scripts/app.py", "import helper\n")
+        self.write("scripts/helper.py", "from nested import VALUE\n")
+        self.write("scripts/nested.py", "VALUE = 1\n")
+        result = self.audit(["scripts/app.py"])
+        self.assertEqual(result["missing_local_dependencies"], [
+            "scripts/helper.py", "scripts/nested.py"])
+        self.assertEqual(result["unresolved_project_imports"], [])
+        complete = self.audit(["scripts/app.py", "scripts/helper.py", "scripts/nested.py"])
+        self.assertEqual(complete["missing_local_dependencies"], [])
+        self.assertEqual(complete["limitations"], [])
+
+    def test_script_sibling_roots_do_not_expand_to_transitive_directories(self):
+        self.write("scripts/app.py", "import pkg.helper\n")
+        self.write("scripts/pkg/helper.py", "import unrelated\n")
+        self.write("scripts/pkg/unrelated.py", "raise RuntimeError('not on import path')\n")
+        self.write("other/unrelated.py", "raise RuntimeError('not on import path')\n")
+        result = self.audit(["scripts/app.py"])
+        self.assertEqual(result["missing_local_dependencies"], ["scripts/pkg/helper.py"])
+        self.assertEqual(result["visited_local_python_files"], [
+            "scripts/app.py", "scripts/pkg/helper.py"])
+
+    def test_linked_script_sibling_is_uncertain_without_reading_target(self):
+        self.write("scripts/app.py", "import helper\n")
+        self.write("hidden.py", "VALUE = 1\n")
+        with tempfile.TemporaryDirectory() as outside:
+            target = Path(outside).resolve() / "helper.py"
+            target.write_text("import hidden\n", encoding="utf-8")
+            try:
+                (self.root / "scripts/helper.py").symlink_to(target)
+            except OSError:
+                self.skipTest("Symlink privilege unavailable")
+            result = self.audit(["scripts/app.py"])
+        self.assertIn("scripts/helper.py", result["missing_local_dependencies"])
+        self.assertIn("INPUT_UNAVAILABLE_OR_UNSAFE:scripts/helper.py", result["limitations"])
+        self.assertNotIn("hidden.py", result["visited_local_python_files"])
+
+    def test_src_regular_package_initializer_and_transitive_imports_detected(self):
+        self.write("app.py", "import src.worker\n")
+        self.write("src/worker.py", "pass\n")
+        self.write("src/__init__.py", "import hidden\n")
+        self.write("hidden.py", "VALUE = 1\n")
+        result = self.audit(["app.py", "src/worker.py"])
+        self.assertEqual(result["missing_local_dependencies"], ["hidden.py", "src/__init__.py"])
+
+    def test_src_regular_package_relative_imports(self):
+        self.write("src/worker.py", "pass\n")
+        self.write("src/__init__.py", "from . import helper\n")
+        self.write("src/helper.py", "VALUE = 1\n")
+        result = self.audit(["src/worker.py"])
+        self.assertEqual(result["missing_local_dependencies"], ["src/__init__.py", "src/helper.py"])
+        self.assertEqual(result["unresolved_project_imports"], [])
+        self.assertEqual(result["limitations"], [])
+
+    def test_src_namespace_package_child_import(self):
+        self.write("src/pkg/app.py", "from . import helper\n")
+        self.write("src/pkg/helper.py", "VALUE = 1\n")
+        result = self.audit(["src/pkg/app.py"])
+        self.assertEqual(result["missing_local_dependencies"], ["src/pkg/helper.py"])
+        self.assertEqual(result["unresolved_project_imports"], [])
+        self.assertEqual(result["limitations"], [])
+
     def test_relative_import_cannot_escape_source_root(self):
         self.write("src/pkg/app.py", "from .. import hidden\n")
         self.write("src/hidden.py", "VALUE = 1\n")

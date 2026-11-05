@@ -17,7 +17,7 @@ import tempfile
 
 from .agent_logs import import_log, IMPORTS
 from . import core
-from .safe_io import write_json
+from .safe_io import write_json, read_bytes, strict_json_loads
 
 MAX_INDEX = 2_000_000
 MAX_CASES = 250
@@ -30,17 +30,7 @@ PROVENANCE = frozenset(('synthetic', 'public-documentation', 'consented-real'))
 def _read_index(path: Path) -> dict:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_INDEX:
         raise ValueError('Corpus index must be a regular, non-symlink JSON file <=2 MB')
-    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_INDEX:
-            raise ValueError('Invalid corpus index')
-        with os.fdopen(fd, 'rb') as f:
-            data = json.load(f)
-    except BaseException:
-        try: os.close(fd)
-        except OSError: pass
-        raise
+    data = strict_json_loads(read_bytes(path, MAX_INDEX))
     if not isinstance(data, dict) or data.get('schema') != 'raee-corpus-v1':
         raise ValueError('Unsupported corpus schema')
     cases = data.get('cases')
@@ -90,6 +80,8 @@ def evaluate(index: Path) -> dict:
         for row in expected:
             if not isinstance(row, dict) or row.get('kind') not in KINDS:
                 raise ValueError('Invalid expected check kind')
+            if 'exit_code' not in row:
+                raise ValueError('Expected exit_code is required; use explicit null for unknown')
             code = row.get('exit_code')
             if code is not None and (type(code) is not int or not -100000 <= code <= 100000):
                 raise ValueError('Invalid expected exit code')
@@ -105,9 +97,10 @@ def evaluate(index: Path) -> dict:
                 data = core.read_json(fixture_root / IMPORTS, {'observations': []})
                 observed_pairs = [(e.get('check_kind_hint'), e.get('log_exit_code')) for e in data.get('observations', [])]
             except (ValueError, OSError, TypeError, KeyError, RecursionError):
-                totals['parser_errors'] += 1
-                by_provider[provider]['parser_errors'] += 1
-                by_origin[provenance]['parser_errors'] += 1
+                for group in (totals, by_provider[provider], by_origin[provenance]):
+                    group['parser_errors'] += 1
+                    group['expected_events'] += len(expected_pairs)
+                    group['fn'] += len(expected_pairs)
                 diagnostics.append({'id': cid, 'provider': provider, 'provenance': provenance,
                                     'status': 'PARSER_ERROR', 'expected_count': len(expected_pairs)})
                 continue
@@ -155,6 +148,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description='Evaluate explicitly supplied, annotated local agent log cases')
     parser.add_argument('--index', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--require-exact', action='store_true', help='Fail on mismatches or incomplete parsing')
     args = parser.parse_args(argv)
     # Never print raw source paths or transcript content.
     try:
@@ -163,7 +157,12 @@ def main(argv=None) -> int:
         print(json.dumps({'cases': result['aggregate']['cases'], 'exact_rate': result['aggregate']['session_exact_match_rate'],
                           'event_precision': result['aggregate']['event_precision'], 'event_recall': result['aggregate']['event_recall'],
                           'real_logs': result['has_consent_based_real_logs']}))
-        return 0
+        aggregate = result['aggregate']
+        failed = aggregate.get('parser_errors', 0) > 0
+        if args.require_exact:
+            failed |= any(row['status'] != 'EXACT' for row in result['case_diagnostics'])
+            failed |= any(aggregate.get(key, 0) for key in ('malformed_lines', 'oversize_lines', 'unmatched_calls'))
+        return 1 if failed else 0
     except (OSError, ValueError, TypeError) as exc:
         print('Corpus evaluation rejected: ' + type(exc).__name__)
         return 2

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from raee_lite.preflight import evaluate
 from raee_lite.cli import main
 
@@ -18,7 +19,7 @@ class ReadOnlyPreflight(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve(strict=True)
 
     def test_missing_project_metadata_is_review_not_pass(self):
         r = evaluate(self.root)
@@ -71,6 +72,28 @@ class ReadOnlyPreflight(unittest.TestCase):
     def test_oversized_workflow_fails_closed(self):
         self._workflow('#' + 'x' * 260_000)
         self.assertEqual(evaluate(self.root)['result'], 'BLOCKED')
+
+    def test_large_workflow_directory_cannot_report_complete(self):
+        wf = self._workflow('on: push\n')
+        for index in range(5):
+            (wf.parent / f'ignored-{index}.txt').write_text('')
+        with patch('raee_lite.preflight.MAX_WORKFLOW_ENTRIES', 3):
+            result = evaluate(self.root)
+        self.assertEqual(result['result'], 'BLOCKED')
+        self.assertIn('WORKFLOW_LIMIT', {x['id'] for x in result['findings']})
+
+    def test_workflow_replaced_before_open_is_not_trusted(self):
+        wf = self._workflow('on: push\n')
+        alternate = wf.with_suffix('.replacement')
+        alternate.write_text('permissions: write-all\n')
+        real_open = os.open
+        def replace_then_open(path, flags, *args, **kwargs):
+            if Path(path) == wf and alternate.exists():
+                os.replace(alternate, wf)
+            return real_open(path, flags, *args, **kwargs)
+        with patch('raee_lite.safe_io.os.open', side_effect=replace_then_open):
+            result = evaluate(self.root)
+        self.assertIn('WORKFLOW_UNREADABLE', {x['id'] for x in result['findings']})
 
     @unittest.skipUnless(hasattr(os, 'symlink'), 'requires symlink support')
     def test_symlink_workflow_rejected(self):

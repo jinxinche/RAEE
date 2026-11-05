@@ -9,6 +9,7 @@ import argparse
 from collections import Counter
 import json
 import os
+import platform
 from pathlib import Path
 import sys
 import tempfile
@@ -16,21 +17,49 @@ import unittest
 
 
 REQUIRED_TEST_MODULES = {
+    'test_agent_log_integrity': 22,
+    'test_association_metrics_v09': 5,
+    'test_attestation_v07': 22,
+    'test_branch_protection_policy': 12,
+    'test_ci_attestation_v08': 17,
+    'test_ci_verification_integrity': 10,
+    'test_cli': 6,
+    'test_contracts': 9,
+    'test_concurrent_evidence': 30,
     'test_counterevidence': 10,
-    'test_dependency_completeness_audit': 19,
-    'test_dependency_declarations': 1,
+    'test_dependency_completeness_audit': 27,
+    'test_dependency_declarations': 6,
     'test_dependency_scope_ablation': 22,
+    'test_enhanced': 12,
+    'test_evidence_integrity': 21,
+    'test_git_process_integrity': 17,
+    'test_isolated_v06': 19,
+    'test_obligation_trace': 8,
+    'test_pr_bootstrap': 4,
+    'test_pr_boundary_policy_v091': 8,
+    'test_pr_diff_integrity': 20,
+    'test_preflight_v010': 16,
+    'test_readonly_io': 15,
+    'test_report_integrity': 28,
     'test_real_cross_os_protocol': 11,
     'test_security_v05': 24,
+    'test_signing_integrity': 10,
     'test_workflow_policy_v09': 7,
-    'test_reviewed_suite': 6,
+    'test_reviewed_suite': 10,
+    'test_trust_chain_rc2': 6,
+    'test_v04': 21,
+    'test_validation_v09': 23,
 }
+MIN_TESTS = sum(REQUIRED_TEST_MODULES.values())
 
 WINDOWS_CRITICAL_SKIPS = {
     'test_dependency_scope_ablation.DependencyScopeAblationTests.test_project_symlink_path_not_followed',
     'test_real_cross_os_protocol.RealMatrixContract.test_macos_style_temp_symlink_is_canonicalized_only_for_owned_fixture',
     'test_dependency_completeness_audit.CompletenessAuditTests.test_declared_path_through_link_never_reads_external_file',
     'test_security_v05.SecurityV05.test_symlink_to_ledger_cannot_be_overwritten',
+    'test_attestation_v07.AttestationTests.test_private_key_world_readable_rejected',
+    'test_readonly_io.ReadonlyIOTests.test_fifo_inputs_return_without_blocking',
+    'test_git_process_integrity.CaptureIntegrityTests.test_parent_exit_with_inherited_stdout_cleans_process_group',
 }
 
 
@@ -44,7 +73,7 @@ def _test_ids(suite):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--min-tests', type=int, default=268)
+    parser.add_argument('--min-tests', type=int, default=MIN_TESTS)
     parser.add_argument('--start-dir', default='tests')
     parser.add_argument('--require-critical-modules', action='store_true')
     parser.add_argument('--summary', type=Path, help='Write bounded machine-readable test outcome counts')
@@ -63,7 +92,11 @@ def main(argv=None):
     ids = list(_test_ids(suite))
     summary = {'schema': 'raee.reviewed_suite.v1', 'discovered': count,
                'tests_run': 0, 'failures': 0, 'errors': len(loader.errors),
-               'skipped': 0, 'expected_failures': 0, 'unexpected_successes': 0, 'gate_passed': False}
+               'skipped': 0, 'expected_failures': 0, 'unexpected_successes': 0, 'gate_passed': False,
+               'environment': {'python': platform.python_version(), 'os': sys.platform,
+                               'architecture': platform.machine()},
+               'minimum_tests': args.min_tests,
+               'critical_modules_required': args.require_critical_modules}
 
     def finish(code):
         summary['gate_passed'] = code == 0
@@ -76,6 +109,9 @@ def main(argv=None):
     if loader.errors:
         print('FAIL CLOSED: test collection contains import errors.', file=sys.stderr)
         return finish(2)
+    if len(ids) != count or len(set(ids)) != count:
+        print('FAIL CLOSED: duplicate or inconsistent discovered test IDs.', file=sys.stderr)
+        return finish(2)
     if count < args.min_tests:
         print('FAIL CLOSED: discovered too few tests; review test collection.', file=sys.stderr)
         return finish(2)
@@ -86,10 +122,25 @@ def main(argv=None):
             print('FAIL CLOSED: critical regression modules missing or reduced: ' + ', '.join(missing),
                   file=sys.stderr)
             return finish(2)
-    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    class TrackedResult(unittest.TextTestResult):
+        def __init__(self, *values, **options):
+            super().__init__(*values, **options)
+            self.executed_ids = []
+
+        def startTest(self, test):
+            self.executed_ids.append(test.id())
+            super().startTest(test)
+
+    result = unittest.TextTestRunner(verbosity=2, resultclass=TrackedResult).run(suite)
     summary.update(tests_run=result.testsRun, failures=len(result.failures), errors=len(result.errors),
                    skipped=len(result.skipped), expected_failures=len(result.expectedFailures),
                    unexpected_successes=len(result.unexpectedSuccesses))
+    if result.testsRun != count:
+        print('FAIL CLOSED: fewer tests ran than were discovered.', file=sys.stderr)
+        return finish(1)
+    if Counter(result.executed_ids) != Counter(ids):
+        print('FAIL CLOSED: executed test identities differ from discovery.', file=sys.stderr)
+        return finish(1)
     if args.require_critical_modules:
         allowed = WINDOWS_CRITICAL_SKIPS if os.name == 'nt' else set()
         unverified = [test.id() for test, _ in result.skipped

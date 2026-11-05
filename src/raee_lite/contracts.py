@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from . import core
-from .evidence_binding import evaluate_binding
+from .evidence_binding import evaluate_binding, valid_execution
 from .dependency_scope import snapshot as scoped_snapshot, compare as compare_scoped
 from .dependency_audit import audit_local_python_scope
 
@@ -66,23 +66,25 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
             if not last:
                 status = "MISSING"
                 gaps.append({"kind": kind, "reason": "No explicitly labelled check was executed for this role."})
-            elif last.get("dependency_scope") is not None:
+            elif not valid_execution(last):
+                status = 'INVALID_EVIDENCE'
+                gaps.append({'kind': kind, 'reason': 'Receipt has no valid integer process exit code.'})
+            elif 'dependency_scope' in last:
                 # Explicit scoped receipts do NOT fall back silently to the
                 # global fingerprint or assume the previously declared external
                 # revision still applies in a new review environment.
                 context = (dependency_context or {}).get(rid)
-                if not isinstance(context, dict):
+                if not isinstance(last['dependency_scope'], dict):
+                    status = 'SCOPE_UNBOUND'
+                elif not isinstance(context, dict):
                     status = "SCOPE_CONTEXT_REQUIRED"
                 else:
                     binding = last["dependency_scope"]
                     if not isinstance(binding, dict) or not isinstance(binding.get("before"), dict):
                         status = "SCOPE_UNBOUND"
-                    elif compare_scoped(binding["before"], binding.get("after")) == "SCOPE_UNBOUND":
-                        status = "SCOPE_UNBOUND"
-                    elif (
-                        binding["before"].get("binding_sha256") != binding["after"].get("binding_sha256")
-                    ):
-                        status = "STALE"
+                    elif compare_scoped(binding["before"], binding.get("after")) != "DECLARED_INPUTS_MATCHED":
+                        mismatch = compare_scoped(binding["before"], binding.get("after"))
+                        status = mismatch if mismatch in ('SCOPE_UNBOUND', 'SCOPE_DECLARATION_CHANGED') else 'STALE'
                     else:
                         try:
                             current = scoped_snapshot(root, context["paths"], context.get("external_revisions"))
@@ -99,7 +101,13 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
                     if status == "OBSERVED_PASS":
                         try:
                             scope_audit = audit_local_python_scope(root, context["paths"])
-                            if scope_audit["missing_local_dependencies"]:
+                            history = [binding.get('audit_before'), binding.get('audit_after')]
+                            if any(isinstance(item, dict) and item.get('missing_local_dependencies') for item in history):
+                                status = 'SCOPE_INCOMPLETE'
+                            elif any(not isinstance(item, dict) or item.get('schema') != 'raee.dependency_completeness_audit.v1'
+                                     or item.get('limitations') or item.get('unresolved_project_imports') for item in history):
+                                status = 'SCOPE_AUDIT_UNCERTAIN'
+                            elif scope_audit["missing_local_dependencies"]:
                                 status = "SCOPE_INCOMPLETE"
                             elif scope_audit["limitations"] or scope_audit["unresolved_project_imports"]:
                                 status = "SCOPE_AUDIT_UNCERTAIN"
@@ -123,7 +131,7 @@ def assess_contracts(root: Path, source: dict, *, target_environment: dict | Non
             else:
                 status = "OBSERVED_PASS"
             row = {"kind": kind, "state": status, "evidence_id": last.get("id") if last else None,
-                   "binding_kind": "declared_scope" if last and last.get("dependency_scope") is not None else "global"}
+                   "binding_kind": "declared_scope" if last and 'dependency_scope' in last else "global"}
             if scope_audit is not None:
                 row["dependency_audit"] = scope_audit
             evidence_by_kind.append(row)

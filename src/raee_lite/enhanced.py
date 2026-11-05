@@ -17,6 +17,7 @@ from .safe_process import run as bounded_run
 from .discovery import Check, discover, risk_signals
 from .contracts import assess_contracts, has_contract_gaps
 from .associations import build_associations
+from .evidence_binding import evaluate_environment, valid_execution
 
 VERSION = "0.8.0"
 
@@ -37,6 +38,8 @@ def run_discovered(root: Path, check: Check, timeout: int = 120) -> dict:
     if timeout <= 0:
         raise ValueError("Timeout must be positive")
     ledger = core.read_json(root / core.LEDGER, {"schema": 1, "runs": []})
+    if len(ledger['runs']) >= core.MAX_RUNS:
+        raise ValueError('Evidence ledger limit reached; archive before executing another check')
     before = core.fingerprint(root)
     env = dict(os.environ)
     env["CI"] = "true"  # disable runner watch-mode; does NOT sandbox execution
@@ -44,7 +47,6 @@ def run_discovered(root: Path, check: Check, timeout: int = 120) -> dict:
     stdout_hash = stderr_hash = None
     after = core.fingerprint(root)
     entry = {
-        "id": f"E{len(ledger.get('runs', [])) + 1}",
         "role": "verification", "origin": "auto_discovered",
         "requirement": check.id, "check_kind": check.kind,
         "command": list(check.command), "observed_exit_code": code,
@@ -59,9 +61,7 @@ def run_discovered(root: Path, check: Check, timeout: int = 120) -> dict:
         "environment": {"python": sys.version.split()[0], "os": platform.platform()},
         "change": core.git_context(root),
     }
-    ledger.setdefault("runs", []).append(entry)
-    core.write_json(root / core.LEDGER, ledger)
-    return entry
+    return core.append_receipt(root, entry)
 
 
 def audit(root: Path) -> dict:
@@ -84,8 +84,12 @@ def audit(root: Path) -> dict:
         last = matching[-1] if matching else None
         if not last:
             state = "NOT_RUN"
-        elif last["source_fingerprint"] != current["sha256"] or last.get("source_fingerprint_after") != last["source_fingerprint"]:
+        elif not valid_execution(last):
+            state = 'INVALID_EVIDENCE'
+        elif last.get("source_fingerprint") != current["sha256"] or last.get("source_fingerprint_after") != last["source_fingerprint"]:
             state = "STALE"
+        elif evaluate_environment(last) != 'BINDING_MATCHED':
+            state = evaluate_environment(last)
         elif last.get("files_skipped") or current["skipped"]:
             state = "PARTIAL_COVERAGE" if last["observed_exit_code"] == 0 else "FAILED"
         elif last["observed_exit_code"] == 0:
@@ -94,7 +98,7 @@ def audit(root: Path) -> dict:
             state = "FAILED"
         auto.append({**check.as_dict(), "state": state,
                      "evidence_id": last["id"] if last else None,
-                     "exit_code": last["observed_exit_code"] if last else None})
+                     "exit_code": last.get("observed_exit_code") if last else None})
     report["automatic_checks"] = auto
     report["evidence_contracts"] = assess_contracts(root, current)
     report["discovery_notes"] = notes
@@ -118,6 +122,9 @@ def audit(root: Path) -> dict:
     states = [c["state"] for c in auto]
     if "FAILED" in states:
         report["overall"] = "FAILED_CHECK"
+    elif any(state not in ('OBSERVED_PASS', 'NOT_RUN') for state in states):
+        if report['overall'] not in ('FAILED_CHECK', 'STALE_EVIDENCE'):
+            report['overall'] = 'STALE_EVIDENCE' if 'STALE' in states else 'INSUFFICIENT_EVIDENCE'
     elif report["requirements"]:
         # User-declared requirements determine coverage. A generic 'npm test' pass
         # cannot automatically prove a user requirement such as 'login works'.

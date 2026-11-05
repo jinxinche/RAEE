@@ -20,10 +20,13 @@ from pathlib import Path
 from . import core
 from .contracts import KINDS
 from .safe_process import run as bounded_run
+from .safe_io import bounded_walk
 
 MAX_FILES = 5000
 MAX_FILE_SIZE = 8 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_SCAN_ENTRIES = 10_000
+MAX_SCAN_DIRECTORIES = 5_000
 DEFAULT_MEMORY_MB = 512
 DEFAULT_CPUS = 1.0
 DEFAULT_PIDS = 64
@@ -61,40 +64,44 @@ def stage_snapshot(root: Path, staging: Path) -> dict:
     files = 0
     total = 0
     exclusions = []
+    excluded_total = unsafe_count = 0
     included = []
-    for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+
+    def exclude(path, reason):
+        nonlocal excluded_total, unsafe_count
+        excluded_total += 1
+        unsafe_count += reason != 'excluded_directory_or_symlink'
+        if len(exclusions) < 100:
+            exclusions.append({'path': path, 'reason': reason})
+
+    for directory, dirnames, filenames in bounded_walk(
+            root, max_entries=MAX_SCAN_ENTRIES, max_directories=MAX_SCAN_DIRECTORIES,
+            exclude_dirs=DENY_DIRS):
         folder = Path(directory)
         rel_dir = folder.relative_to(root)
-        # os.walk order otherwise varies across hosts.
-        good_dirs = []
-        for name in sorted(dirnames):
+        for name in dirnames:
             rel = (rel_dir / name).as_posix()
-            candidate = folder / name
-            if candidate.is_symlink():
-                exclusions.append({'path': rel, 'reason': 'directory_symlink_excluded'})
-            elif name in DENY_DIRS:
-                exclusions.append({'path': rel, 'reason': 'excluded_directory_or_symlink'})
-            else:
-                good_dirs.append(name)
-        dirnames[:] = good_dirs
+            if name in DENY_DIRS:
+                exclude(rel, 'excluded_directory_or_symlink')
         outdir = staging / rel_dir
         outdir.mkdir(parents=True, exist_ok=True, mode=0o755)
-        for name in sorted(filenames):
+        for name in filenames:
             source = folder / name
             rel = (rel_dir / name).as_posix()
             if _denied_filename(name):
-                exclusions.append({'path': rel, 'reason': 'sensitive_name_excluded'})
+                exclude(rel, 'sensitive_name_excluded')
                 continue
             try:
                 st = source.lstat()
                 if not stat.S_ISREG(st.st_mode):
-                    exclusions.append({'path': rel, 'reason': 'not_regular_file_or_symlink'})
+                    exclude(rel, 'not_regular_file_or_symlink')
                     continue
                 if st.st_size > MAX_FILE_SIZE:
                     raise ValueError(f'Snapshot exceeds per-file limit at {rel}')
                 if files + 1 > MAX_FILES or total + st.st_size > MAX_TOTAL_BYTES:
                     raise ValueError('Snapshot exceeds 5000-file / 64-MiB budget; no execution performed')
-                flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                flags = (os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) |
+                         getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0))
                 fd = os.open(source, flags)
                 try:
                     fst = os.fstat(fd)
@@ -127,9 +134,8 @@ def stage_snapshot(root: Path, staging: Path) -> dict:
                     os.close(fd)
             except (OSError, UnicodeError) as exc:
                 raise ValueError(f'Snapshot refused unreadable or unsafe file {rel}: {type(exc).__name__}') from exc
-    unsafe_count = sum(e['reason'] != 'excluded_directory_or_symlink' for e in exclusions)
     return {'sha256': digest.hexdigest(), 'files': files, 'bytes': total,
-            'excluded_paths': exclusions[:100], 'excluded_total': len(exclusions), 'unsafe_excluded_total': unsafe_count,
+            'excluded_paths': exclusions, 'excluded_total': excluded_total, 'unsafe_excluded_total': unsafe_count,
             'included_paths_sample': included,
             'policy': 'Regular files only; hidden credentials and known generated folders excluded; no symlinks.'}
 
@@ -206,8 +212,14 @@ def replay(root: Path, requirement: str, kind: str, command: list[str], *, image
         raise ValueError('Timeout must be 1-3600 seconds')
     if not command or any(not item or '\x00' in item for item in command):
         raise ValueError('Missing or invalid execution arguments')
-    if requirement not in {r['id'] for r in core.get_manifest(root).get('requirements', [])}:
+    manifest = core.get_manifest(root)
+    if requirement not in {r['id'] for r in manifest.get('requirements', [])}:
         raise ValueError(f'Unknown requirement: {requirement}')
+    from .evidence_binding import intent_digest
+    requirement_digest = intent_digest(next(r['description'] for r in manifest['requirements'] if r['id'] == requirement))
+    ledger = core.read_json(root / core.LEDGER, {'schema': 1, 'runs': []})
+    if not dry_run and len(ledger['runs']) >= core.MAX_RUNS:
+        raise ValueError('Evidence ledger limit reached; archive before executing another check')
     # Reject unsupported workspace path syntaxes rather than potentially mounting wrong directory.
     root = root.resolve(strict=True)
     if any(',' in str(p) or '\n' in str(p) or '\r' in str(p) for p in [root]):
@@ -258,9 +270,8 @@ def replay(root: Path, requirement: str, kind: str, command: list[str], *, image
         after = core.fingerprint(root)
         # Never treat Docker infrastructure errors as passing verification evidence.
         status = 'pass' if code == 0 else ('infrastructure_error' if code in (124, 125, 126, 127) else 'fail')
-        ledger = core.read_json(root / core.LEDGER, {'schema': 1, 'runs': []})
-        entry = {'id': f"E{len(ledger.get('runs', [])) + 1}",
-                 'role': 'verification', 'origin': 'isolated_replay', 'requirement': requirement,
+        entry = {'role': 'verification', 'origin': 'isolated_replay', 'requirement': requirement,
+                 'requirement_digest': requirement_digest,
                  'declared_kind': kind, 'command': ['[isolated command redacted]'],
                  'command_sha256': hashlib.sha256(json.dumps(command).encode()).hexdigest(),
                  'observed_exit_code': code, 'observed_status': status,
@@ -284,6 +295,4 @@ def replay(root: Path, requirement: str, kind: str, command: list[str], *, image
                                'limits': ['container escape not ruled out', 'source snapshot may omit inputs',
                                           'test coverage is self-declared']},
                  'change': core.git_context(root)}
-        ledger.setdefault('runs', []).append(entry)
-        core.write_json(root / core.LEDGER, ledger)
-        return entry
+        return core.append_receipt(root, entry)

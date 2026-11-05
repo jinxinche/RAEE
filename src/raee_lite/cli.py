@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     cv = sub.add_parser('validate-corpus', help='Evaluate annotated, explicitly approved local agent JSONL fixtures')
     cv.add_argument('--index', required=True, help='JSON index with synthetic/consented case labels')
     cv.add_argument('--out', required=True, help='Aggregate JSON results; raw logs are not copied')
+    cv.add_argument('--require-exact', action='store_true', help='Fail on mismatches or incomplete parsing')
     args = parser.parse_args(argv)
     root = Path(args.project).resolve()
     def project_path(value: str) -> Path:
@@ -134,7 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         if not root.is_dir():
             raise ValueError(f"Project folder does not exist: {root}")
         if args.action == 'validate-corpus':
-            return validation.main(['--index', str(project_path(args.index)), '--out', str(project_path(args.out))])
+            return validation.main(['--index', str(project_path(args.index)), '--out', str(project_path(args.out))]
+                                   + (['--require-exact'] if args.require_exact else []))
         if args.action == 'ci-export':
             result = ci_attestation.export(root, expected_repo=args.expected_repo,
                     trusted_ref=args.trusted_ref, workflow=args.workflow,

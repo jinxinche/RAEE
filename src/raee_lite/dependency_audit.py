@@ -18,12 +18,20 @@ MAX_AST_NODES = 100_000
 _DYNAMIC = {"__import__", "import_module", "exec", "eval"}
 
 
-def _search_roots(root: Path) -> tuple[Path, ...]:
-    """Return bounded Python source roots without following a linked src tree."""
+def _search_roots(root: Path, entries: tuple[str, ...]) -> tuple[Path, ...]:
+    """Include declared script parents, bounded by MAX_DECLARED_FILES.
+
+    A directly executed script imports from its own directory. Do not add
+    directories of subsequently discovered modules or recursively scan trees.
+    """
     roots = [root]
     src = root / "src"
     if not src.is_symlink() and src.is_dir():
         roots.append(src)
+    for rel in entries:
+        parent = (root / rel).parent
+        if parent not in roots and not _unsafe_path(root, parent) and parent.is_dir():
+            roots.append(parent)
     return tuple(roots)
 
 
@@ -35,12 +43,12 @@ def _unsafe_path(root: Path, path: Path) -> bool:
     )
 
 
-def _module_paths(root: Path, name: str) -> set[str]:
+def _module_paths(root: Path, name: str, search_roots: tuple[Path, ...]) -> set[str]:
     if not name or any(not x.isidentifier() for x in name.split(".")):
         return set()
     stem = "/".join(name.split("."))
     found = set()
-    for search_root in _search_roots(root):
+    for search_root in search_roots:
         for rel in (stem + ".py", stem + "/__init__.py"):
             p = search_root / rel
             if _unsafe_path(root, p):
@@ -57,8 +65,9 @@ def _module_paths(root: Path, name: str) -> set[str]:
 def _package_initializers(root: Path, path: Path) -> set[str]:
     found = set()
     for parent in path.parents:
-        if parent in (root, root / "src"):
+        if parent == root:
             break
+        # A directory named src may itself be a regular imported package.
         initializer = parent / "__init__.py"
         # Queue linked initializers too; the reader must report the unsafe
         # dependency instead of silently omitting it.
@@ -92,14 +101,14 @@ def _read_source(root: Path, path: Path, remaining: int) -> bytes:
         os.close(fd)
 
 
-def _looks_project_local(root: Path, name: str) -> bool:
+def _looks_project_local(name: str, search_roots: tuple[Path, ...]) -> bool:
     if not name:
         return False
     top = name.split(".", 1)[0]
     if top in {"src", "tests"}:
         return True
     return any((base / top).is_dir() or (base / f"{top}.py").is_file()
-               for base in _search_roots(root))
+               for base in search_roots)
 
 
 def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
@@ -115,7 +124,11 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
     warnings: set[str] = set()
     if (root / "src").is_symlink():
         warnings.add("SOURCE_ROOT_UNAVAILABLE_OR_UNSAFE:src")
-    queue = deque(sorted(p for p in declared if p.endswith(".py")))
+    entries = tuple(sorted(p for p in declared if p.endswith(".py")))
+    search_roots = _search_roots(root, entries)
+    src_initializer = root / "src" / "__init__.py"
+    src_is_package = src_initializer.is_symlink() or src_initializer.is_file()
+    queue = deque(entries)
     scheduled = set(queue)
     if not queue:
         warnings.add("NO_PYTHON_ENTRY_FILES")
@@ -131,7 +144,7 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
         return bool(targets)
 
     def discover(module):
-        return enqueue(_module_paths(root, module))
+        return enqueue(_module_paths(root, module, search_roots))
 
     while queue:
         if len(visited) >= MAX_VISITED:
@@ -159,7 +172,7 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
         except (UnicodeError, SyntaxError, ValueError, RecursionError):
             warnings.add("INPUT_UNPARSEABLE:" + rel)
             continue
-        source_rel = rel[4:] if rel.startswith("src/") else rel
+        source_rel = rel[4:] if rel.startswith("src/") and not src_is_package else rel
         package = source_rel[:-3].replace("/", ".")
         if package.endswith(".__init__"):
             package = package[:-9]
@@ -172,7 +185,7 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                 break
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if not discover(alias.name) and _looks_project_local(root, alias.name):
+                    if not discover(alias.name) and _looks_project_local(alias.name, search_roots):
                         unresolved.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
@@ -195,14 +208,15 @@ def audit_local_python_scope(root: Path, declared_paths: list[str]) -> dict:
                     warnings.add("DYNAMIC_EXECUTION_OR_IMPORT:" + rel)
                 # A resolved base may export an attribute with the imported
                 # name, so an unresolved base.name is not itself an omission.
-                if not resolved and (node.level or _looks_project_local(root, base)):
+                if not resolved and (node.level or _looks_project_local(base, search_roots)):
                     unresolved.add(base or f"relative-from:{rel}")
                 if any(a.name == "*" for a in node.names):
                     warnings.add("STAR_IMPORT:" + rel)
-            elif isinstance(node, ast.Call):
-                fn = node.func
-                called = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
-                if called in _DYNAMIC:
+            elif isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+                # References can escape through aliases, callbacks or defaults;
+                # flag them without needing to prove where they are called.
+                referenced = node.id if isinstance(node, ast.Name) else node.attr
+                if referenced in _DYNAMIC:
                     warnings.add("DYNAMIC_EXECUTION_OR_IMPORT:" + rel)
         if "AST_BUDGET_EXCEEDED" in warnings:
             break

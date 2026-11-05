@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from raee_lite.validation import evaluate, main
 from raee_lite.cli import main as cli
+from raee_lite.agent_logs import import_log
 
 
 class ValidationV09(unittest.TestCase):
@@ -131,6 +132,59 @@ class ValidationV09(unittest.TestCase):
     def test_error_no_private_path_logged(self):
         idx=self.fixture(file='bad;command.jsonl')
         self.assertEqual(main(['--index',str(idx),'--out',str(self.root/'summary.json')]),2)
+
+    def test_require_exact_mismatch_is_nonzero_and_preserves_summary(self):
+        self.fixture(expected=[])
+        self.assertEqual(cli(['--project', str(self.root), 'validate-corpus', '--index', 'index.json',
+                              '--out', 'summary.json', '--require-exact']), 1)
+        self.assertEqual(json.loads((self.root / 'summary.json').read_text())['aggregate']['fp'], 1)
+
+    def test_parser_failure_never_returns_success(self):
+        idx = self.fixture()
+        with patch('raee_lite.validation.import_log', side_effect=ValueError('private detail')):
+            self.assertEqual(main(['--index', str(idx), '--out', str(self.root / 'summary.json')]), 1)
+        aggregate = json.loads((self.root / 'summary.json').read_text())['aggregate']
+        self.assertEqual(aggregate['parser_errors'], 1)
+        self.assertEqual(aggregate['fn'], 1)
+        self.assertEqual(aggregate['event_recall'], 0.0)
+
+    def test_failed_case_is_not_dropped_from_recall_denominator(self):
+        idx = self.fixture()
+        data = json.loads(idx.read_text())
+        data['cases'].append(dict(data['cases'][0], id='case_2'))
+        idx.write_text(json.dumps(data))
+        calls = 0
+        def parse(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError('parser failed')
+            return import_log(*args)
+        with patch('raee_lite.validation.import_log', side_effect=parse):
+            aggregate = evaluate(idx)['aggregate']
+        self.assertEqual((aggregate['expected_events'], aggregate['tp'], aggregate['fn']), (2, 1, 1))
+        self.assertEqual(aggregate['event_recall'], 0.5)
+
+    def test_require_exact_rejects_malformed_input_even_when_events_match(self):
+        idx = self.fixture()
+        log = self.root / 'case.jsonl'
+        log.write_text('not JSON\n' + log.read_text())
+        self.assertEqual(main(['--index', str(idx), '--out', str(self.root / 'summary.json'), '--require-exact']), 1)
+
+    def test_require_exact_allows_explicitly_expected_unknown_exit(self):
+        rows = [{'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 't', 'name': 'Bash',
+                 'input': {'command': 'pytest'}}]}}, {'type': 'user', 'message': {'content': [
+                 {'type': 'tool_result', 'tool_use_id': 't', 'content': 'done'}]}}]
+        idx = self.fixture(rows=rows, expected=[{'kind': 'unit', 'exit_code': None}])
+        self.assertEqual(main(['--index', str(idx), '--out', str(self.root / 'summary.json'), '--require-exact']), 0)
+
+    def test_missing_or_misspelled_expected_exit_code_is_not_unknown(self):
+        for expected in ({'kind': 'unit'}, {'kind': 'unit', 'exit_cod': 0}):
+            with self.subTest(expected=expected):
+                idx = self.fixture(expected=[expected])
+                with self.assertRaisesRegex(ValueError, 'exit_code is required'):
+                    evaluate(idx)
+                self.assertEqual(main(['--index', str(idx), '--out', str(self.root / 'summary.json'), '--require-exact']), 2)
 
 
 if __name__ == '__main__':unittest.main()

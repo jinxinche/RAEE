@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import stat
 from pathlib import Path
 from typing import Mapping, Sequence
+from .safe_io import read_bytes
 
 MAX_DECLARED_FILES = 64
 MAX_FILE_BYTES = 2_000_000
@@ -81,29 +80,12 @@ def snapshot(root: Path, paths: Sequence[str],
             if parent.is_symlink():
                 raise ValueError("Declared dependency uses a symlink path")
         try:
-            meta = os.lstat(p)
-            if not stat.S_ISREG(meta.st_mode):
-                raise ValueError("Declared dependency must be a regular file")
-            if meta.st_size > MAX_FILE_BYTES:
-                raise ValueError("Declared dependency file exceeds size bound")
-            total += meta.st_size
+            data = read_bytes(p, min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - total))
+            total += len(data)
             if total > MAX_TOTAL_BYTES:
                 raise ValueError("Declared dependency total exceeds byte budget")
-            # O_NOFOLLOW where available prevents following a swapped final link.
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(p, flags)
-            try:
-                handle_meta = os.fstat(fd)
-                if not stat.S_ISREG(handle_meta.st_mode) or handle_meta.st_size > MAX_FILE_BYTES:
-                    raise ValueError("Declared dependency changed into invalid file")
-                with os.fdopen(fd, "rb", closefd=False) as h:
-                    data = h.read(MAX_FILE_BYTES + 1)
-                if len(data) > MAX_FILE_BYTES:
-                    raise ValueError("Declared dependency exceeds read budget")
-                # Report no raw source contents.
-                records.append([rel, hashlib.sha256(data).hexdigest()])
-            finally:
-                os.close(fd)
+            # Report no raw source contents.
+            records.append([rel, hashlib.sha256(data).hexdigest()])
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as ex:
             raise ValueError("Declared dependency unavailable or unsafe") from ex
     files_digest = _digest(records)

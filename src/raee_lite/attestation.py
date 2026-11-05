@@ -14,7 +14,7 @@ import stat
 from pathlib import Path
 
 from . import core
-from .safe_io import safe_read_json, write_json
+from .safe_io import strict_json_loads, write_json
 
 MAX_REPORT = 8_000_000
 MAX_LEDGER = 16_000_000
@@ -39,32 +39,28 @@ def _crypto():
 
 def _file(path: Path, limit: int, *, private: bool = False) -> bytes:
     # Conservative protection against paths that redirect to unexpected files.
-    from .safe_io import _reject_links
-    _reject_links(path)
-    if not path.is_file() or path.stat().st_size > limit:
-        raise ValueError(f'Missing or oversized input: {path}')
-    if private and os.name == 'posix' and (stat.S_IMODE(path.stat().st_mode) & 0o077):
-        raise ValueError('Private signing key must have permissions 0600 (or stricter)')
-    # Use O_NOFOLLOW where supported to avoid a final-component symlink swap.
-    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-    try:
-        data = os.read(fd, limit + 1)
-    finally:
-        os.close(fd)
+    from .safe_io import open_regular_read
+    with open_regular_read(path, limit) as stream:
+        if private and os.name == 'posix' and (stat.S_IMODE(os.fstat(stream.fileno()).st_mode) & 0o077):
+            raise ValueError('Private signing key must have permissions 0600 (or stricter)')
+        data = stream.read(limit + 1)
     if len(data) > limit:
         raise ValueError('Input exceeds byte limit')
     return data
 
 
-def _read_json(path: Path, limit: int) -> dict:
-    raw = _file(path, limit)
+def _json_object(raw: bytes) -> dict:
     try:
-        value = json.loads(raw)
+        value = strict_json_loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError('Invalid UTF-8 JSON document') from exc
     if not isinstance(value, dict):
         raise ValueError('Expected JSON object')
     return value
+
+
+def _read_json(path: Path, limit: int) -> dict:
+    return _json_object(_file(path, limit))
 
 
 def _digest(data: bytes) -> str:
@@ -95,6 +91,13 @@ def _key_id(public_key) -> str:
 
 
 def keygen(private_path: Path, public_path: Path, project: Path) -> dict:
+    """Create a new keypair without overwriting or deleting existing paths.
+
+    On failure, newly created files are retained and may contain partial keys.
+    Private files are created with mode 0600 (or stricter under the umask).
+    Inspect any retained files before retrying with new paths: cleanup by path
+    could delete a concurrent writer's replacement, even after an inode check.
+    """
     serialization, Private, _, _ = _crypto()
     from .safe_io import _reject_links
     private_path, public_path = private_path.expanduser().absolute(), public_path.expanduser().absolute()
@@ -116,19 +119,13 @@ def keygen(private_path: Path, public_path: Path, project: Path) -> dict:
                                serialization.NoEncryption())
     pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
-    try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(secret)
-            f.flush()
-            os.fsync(f.fileno())
-        fd = os.open(public_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
-        with os.fdopen(fd, 'wb') as f:
-            f.write(pub)
-    except BaseException:
-        # Never leave a partial keypair on an I/O failure.
-        private_path.unlink(missing_ok=True)
-        public_path.unlink(missing_ok=True)
-        raise
+    with os.fdopen(fd, 'wb') as f:
+        f.write(secret)
+        f.flush()
+        os.fsync(f.fileno())
+    fd = os.open(public_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(pub)
     return {'public_key_fingerprint': _key_id(key.public_key()), 'private_key': str(private_path),
             'public_key': str(public_path)}
 
@@ -224,9 +221,13 @@ def create(root: Path, key_path: Path, out: Path, *, allow_dirty=False, allow_no
     report_path = root / '.raee' / 'report.json'
     ledger_path = root / '.raee' / 'ledger.json'
     manifest_path = root / '.raee' / 'manifest.json'
-    report = _read_json(report_path, MAX_REPORT)
-    ledger = _read_json(ledger_path, MAX_LEDGER)
-    _read_json(manifest_path, MAX_REPORT)
+    # Parse and hash the same captured bytes. The live audit reads these paths
+    # again, so reject any input change before signing the captured version.
+    inputs = {report_path: MAX_REPORT, ledger_path: MAX_LEDGER, manifest_path: MAX_REPORT}
+    captured = {path: _file(path, limit) for path, limit in inputs.items()}
+    report = _json_object(captured[report_path])
+    ledger = _json_object(captured[ledger_path])
+    _json_object(captured[manifest_path])
     snapshot = _valid_snapshot(root, report, allow_partial=allow_partial)
     git = _git_identity(root, report, allow_dirty=allow_dirty, allow_no_git=allow_no_git)
     # Re-audit current local ledger/manifest before signing, so a stale report
@@ -244,7 +245,7 @@ def create(root: Path, key_path: Path, out: Path, *, allow_dirty=False, allow_no
         raise ValueError('Private signing key cannot reside inside the project directory')
     key = _load_private(key_path)
     source_digest = snapshot['sha256']
-    report_sha = _digest(_file(report_path, MAX_REPORT))
+    report_sha = _digest(captured[report_path])
     statement = {
         '_type': STATEMENT_TYPE,
         'subject': [{'name': 'source-snapshot', 'digest': {'sha256': source_digest}},
@@ -256,8 +257,8 @@ def create(root: Path, key_path: Path, out: Path, *, allow_dirty=False, allow_no
                        'skipped_count': len(snapshot['skipped']),
                        'ignored_and_external_inputs_unverified': True},
             'git': git, 'report_sha256': report_sha,
-            'ledger_sha256': _digest(_file(ledger_path, MAX_LEDGER)),
-            'manifest_sha256': _digest(_file(manifest_path, MAX_REPORT)),
+            'ledger_sha256': _digest(captured[ledger_path]),
+            'manifest_sha256': _digest(captured[manifest_path]),
             'report_overall': report.get('overall'),
             'isolated_receipts': isolated,
             'limitations': ['Signing does not establish that the declared checks test real requirements.',
@@ -267,6 +268,9 @@ def create(root: Path, key_path: Path, out: Path, *, allow_dirty=False, allow_no
         },
     }
     payload = _canonical(statement)
+    for path, limit in inputs.items():
+        if _file(path, limit) != captured[path]:
+            raise ValueError(f'Evidence input changed during signing: {path.name}')
     sig = key.sign(_pae(TYPE.encode(), payload))
     envelope = {'payloadType': TYPE, 'payload': base64.b64encode(payload).decode('ascii'),
                 'signatures': [{'keyid': _key_id(key.public_key()),
@@ -309,7 +313,7 @@ def verify(root: Path, envelope_path: Path, public_path: Path, report_path: Path
     except InvalidSignature as exc:
         raise ValueError('Invalid attestation signature') from exc
     try:
-        stmt = json.loads(payload)
+        stmt = strict_json_loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError('Invalid signed JSON payload') from exc
     if not isinstance(stmt, dict) or stmt.get('_type') != STATEMENT_TYPE or stmt.get('predicateType') != PREDICATE_TYPE:

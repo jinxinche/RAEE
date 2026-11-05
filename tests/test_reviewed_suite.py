@@ -16,12 +16,14 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class ReviewedSuiteTests(unittest.TestCase):
-    def invoke(self, body, *, minima=None, errors=None, windows=False):
+    def invoke(self, body, *, minima=None, errors=None, windows=False, transform=None):
         # Create real unittest cases, then exercise collection and execution
         # independently of the repository's full suite.
         namespace = {'unittest': unittest, '__name__': 'test_critical'}
         exec('class Check(unittest.TestCase):\n' + body, namespace)
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(namespace['Check'])
+        if transform:
+            suite = transform(suite)
         with tempfile.TemporaryDirectory() as directory:
             summary = Path(directory) / 'summary.json'
             with patch.object(RUNNER.unittest, 'TestLoader') as loader, \
@@ -67,3 +69,39 @@ class ReviewedSuiteTests(unittest.TestCase):
         code, receipt = self.invoke(' def test_ok(self): pass\n', errors=['Import failed'])
         self.assertEqual(code, 2)
         self.assertEqual(receipt['errors'], 1)
+
+    def test_duplicate_test_ids_cannot_pad_counts(self):
+        code, receipt = self.invoke(' def test_ok(self): pass\n',
+                                    transform=lambda suite: unittest.TestSuite([*suite, *suite]))
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt['tests_run'], 0)
+
+    def test_suite_cannot_silently_run_fewer_than_discovered(self):
+        class ShortSuite(unittest.TestSuite):
+            def run(self, result, debug=False):
+                next(iter(self))(result)
+                return result
+        code, receipt = self.invoke(' def test_one(self): pass\n def test_two(self): pass\n', transform=ShortSuite)
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['discovered'], 2)
+        self.assertEqual(receipt['tests_run'], 1)
+
+    def test_narrow_windows_skip_exception_is_platform_specific(self):
+        with patch.object(RUNNER, 'WINDOWS_CRITICAL_SKIPS', {'test_critical.Check.test_ok'}):
+            for windows, expected in ((True, 0), (False, 1)):
+                with self.subTest(windows=windows):
+                    code, _ = self.invoke(' def test_ok(self): self.skipTest("platform")\n', windows=windows)
+                    self.assertEqual(code, expected)
+
+    def test_repeated_execution_cannot_replace_a_discovered_test(self):
+        class RepeatSuite(unittest.TestSuite):
+            def run(self, result, debug=False):
+                first = next(iter(self))
+                for _ in range(self.countTestCases()):
+                    first(result)
+                return result
+        code, receipt = self.invoke(' def test_one(self): pass\n def test_two(self): pass\n', transform=RepeatSuite)
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt['discovered'], 2)
+        self.assertEqual(receipt['tests_run'], 2)
+        self.assertFalse(receipt['gate_passed'])
