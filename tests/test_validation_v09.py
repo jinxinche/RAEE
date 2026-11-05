@@ -40,6 +40,20 @@ class ValidationV09(unittest.TestCase):
         self.assertNotIn('tests/test_payment.py',b)
         self.assertFalse(x['has_consent_based_real_logs'])
 
+    def test_owned_temporary_alias_does_not_become_parser_failure(self):
+        index = self.fixture()
+        physical = self.root / 'physical'
+        physical.mkdir()
+        alias = self.root / 'alias'
+        try:
+            alias.symlink_to(physical, target_is_directory=True)
+        except OSError:
+            self.skipTest('Symlink privilege unavailable')
+        with patch.object(tempfile, 'tempdir', str(alias)):
+            result = evaluate(index)
+        self.assertEqual(result['aggregate']['tp'], 1)
+        self.assertEqual(result['aggregate'].get('parser_errors', 0), 0)
+
     def test_false_discovery_not_mislabelled_fpr(self):
         x = evaluate(self.fixture(expected=[]))
         self.assertEqual(x['aggregate']['fp'],1)

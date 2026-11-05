@@ -22,7 +22,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install from the protected main branch only
-        run: python -m pip install --no-deps .
+        run: |
+          python -m pip install ".[attest]"
+          python -m pip check
       - name: Execute reviewed acceptance tests on trusted main
         env:
           CI: 'true'
@@ -30,7 +32,7 @@ jobs:
           raee-lite init
           raee-lite add "Trusted regression suite executes successfully"
           raee-lite expect --for R1 --kind unit
-          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 150
+          raee-lite run --for R1 --kind unit --allow-ci-execution -- python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules
           raee-lite report
       - name: Export bounded claim (not yet authenticated)
         env:

@@ -122,8 +122,16 @@ def snapshot(root: Path, paths: Sequence[str],
 
 def compare(before: dict, after: dict, *, check_external: bool = True) -> str:
     """Compare two explicitly declared bindings without promoting them to proof."""
-    if before.get("schema") != "raee.declared_dependency_scope.v1":
-        return "SCOPE_UNBOUND"
+    for value in (before, after):
+        if not isinstance(value, dict) or value.get("schema") != "raee.declared_dependency_scope.v1":
+            return "SCOPE_UNBOUND"
+        if (not isinstance(value.get("paths"), list) or not value["paths"] or
+                not isinstance(value.get("external_keys"), list) or
+                any(not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key])
+                    for key in ("files_sha256", "external_sha256", "binding_sha256"))):
+            return "SCOPE_UNBOUND"
+        if value["binding_sha256"] != _digest([value["files_sha256"], value["external_sha256"]]):
+            return "SCOPE_UNBOUND"
     if before.get("paths") != after.get("paths") or before.get("external_keys") != after.get("external_keys"):
         return "SCOPE_DECLARATION_CHANGED"
     if before.get("files_sha256") != after.get("files_sha256"):

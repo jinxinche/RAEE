@@ -27,7 +27,7 @@ Verified locally on 2026-10-29 (Linux, Python 3.13.5). The following **are not l
 
 - Owner creates a new, empty **public** `jinxinche/RAEE` repository; reviews the release contents for secrets and license obligations before pushing.
 - Invite an independent trusted reviewer; apply branch protection from `.github/branch-protection.json`, confirm with repository UI/API, require `pr-static-safety` and independent approval.
-- After protection is effective, run `.github/workflows/tests.yml`; record actual job IDs and six conclusions (Linux/Windows/macOS × Python 3.10/3.13).
+- After protection is effective, run `.github/workflows/tests.yml`; record actual job IDs and six conclusions (Linux/Windows/macOS × Python 3.10/3.15).
 - Dispatch `.github/workflows/trusted-evidence.yml` from protected main; retain signed bundle, `ci-evidence.json`, `report.json`, run URL and full commit SHA.
 - From a **separate** trusted environment with GitHub CLI **>=2.97.0**, run `bash scripts/verify_independent.sh ci-evidence.json report.json FULL_SHA`. Test tampering with report, wrong expected SHA and wrong signer (must reject).
 - Open an unprivileged fork PR and attempt safe controlled changes (ordinary file, workflow file, new symlink). Confirm permissions and actual job results.

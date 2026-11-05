@@ -108,7 +108,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          python scripts/run_reviewed_suite.py --min-tests 150
+          python scripts/run_reviewed_suite.py --min-tests 268 --require-critical-modules
       - name: Aggregate actual six-runner evidence, fail if missing
         shell: bash
         env:
