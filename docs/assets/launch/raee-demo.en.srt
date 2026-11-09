@@ -1,0 +1,29 @@
+1
+00:00:00,000 --> 00:00:05,000
+A passing test can leave a requirement untested.
+Actual local output, replayed with reading pauses.
+
+2
+00:00:05,000 --> 00:00:12,000
+An arithmetic test passes without calling signup.
+No linked receipt: UNTESTED.
+
+3
+00:00:12,000 --> 00:00:19,000
+A requirement-linked check exposes the bug.
+The recorded result is FAILED_CHECK.
+
+4
+00:00:19,000 --> 00:00:26,000
+The toy fix passes two example assertions.
+OBSERVED_PASS does not prove complete coverage.
+
+5
+00:00:26,000 --> 00:00:33,000
+A later source edit changes the fingerprint.
+The previous evidence becomes STALE.
+
+6
+00:00:33,000 --> 00:00:40,000
+Try the synthetic example and inspect the evidence.
+Installation and source: github.com/jinxinche/RAEE

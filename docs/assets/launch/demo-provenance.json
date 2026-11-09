@@ -1,0 +1,11 @@
+{
+  "source_commit": "4704dc85581fcbe5c4079196478ee8e8747abd24",
+  "demo_script_sha256": "96f77c527767a657b8ada6a357fbd90b4fd9fcfa26ee3c17084a2cb3426371f3",
+  "stdout_sha256": "900599befc1f70fc79b3104e1cd35360e31fc53c29bac392f9ca304d2a0fecf9",
+  "exit_code": 0,
+  "python": "3.11.16",
+  "system": "Darwin",
+  "architecture": "arm64",
+  "capture_date": "2026-11-09",
+  "presentation": "Slides and terminal-output replay from a real local synthetic demo. Reading pauses are editorial, not execution timing. No screen recording or production email validation is claimed."
+}

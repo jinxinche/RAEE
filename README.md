@@ -23,12 +23,11 @@ For developers using coding agents and reviewers asking what a change actually t
 | The linked test passes after a fix | A labelled command passed: `OBSERVED_PASS` |
 | Source changes after that check | The old result no longer applies: `STALE` |
 
-```mermaid
-flowchart LR
-    A[UNTESTED] -->|Run a linked test| B[FAILED_CHECK]
-    B -->|Fix and rerun| C[OBSERVED_PASS]
-    C -->|Edit source| D[STALE]
-```
+![Demo: UNTESTED → FAILED_CHECK → OBSERVED_PASS → STALE](docs/assets/launch/raee-demo.gif)
+
+[40-second video](docs/assets/launch/raee-demo-40s.mp4) · [Static transcript and reproduction](examples/DEMO.md) · [Media details and subtitles](docs/assets/launch/README.md)
+
+The animation replays real local output from a synthetic fixture with added reading pauses; it is not a screen recording or timing benchmark.
 
 This is the path taken by the [runnable synthetic demo](examples/DEMO.md), not the complete state machine. Requirement links and check kinds are supplied by the user; RAEE-Lite does not infer semantic test coverage. `OBSERVED_PASS` is not proof that a feature is correct.
 
