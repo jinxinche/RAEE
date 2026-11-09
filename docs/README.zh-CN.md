@@ -12,6 +12,12 @@ RAEE-Lite 是一个本地 Python 命令行工具：把需求和实际检查记�
 
 ## 先看一个可运行的例子
 
+![演示：未验证 → 检查失败 → 观察到通过 → 证据过期](assets/launch/raee-demo.gif)
+
+[40 秒视频](assets/launch/raee-demo-40s.mp4) · [中文及英文字幕](assets/launch/README.md) · [静态文字版](../examples/DEMO.md)
+
+这是合成示例的真实本地输出回放，加入了便于阅读的停顿；并非实时录屏或性能测试。
+
 在 Python 3.10+ 虚拟环境中，从检查过的源码目录运行：
 
 ```bash

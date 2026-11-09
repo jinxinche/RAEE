@@ -1,6 +1,6 @@
 # RAEE-Lite — Early-access community outreach kit
 
-**Campaign state (9 November 2026):** Public open-source preview, **v0.10.0rc2 source merged into `main`**, including [PR #14](https://github.com/jinxinche/RAEE/pull/14). This is an editorial kit, **not evidence that any off-GitHub post has been published**.
+**Campaign state (9 November 2026):** Public open-source preview, **v0.10.0rc2 source merged into `main`**, including [PR #14](https://github.com/jinxinche/RAEE/pull/14) and the runnable showcase in [PR #15](https://github.com/jinxinche/RAEE/pull/15). This is an editorial kit, **not evidence that any off-GitHub post has been published**.
 
 Canonical destination: https://github.com/jinxinche/RAEE
 
@@ -32,37 +32,21 @@ AI coding assistants often treat “command exited 0” and “user's feature is
 
 Never claim that RAEE-Lite proves correctness, calculates complete semantic test coverage, guarantees deployment security, or possesses a verified GitHub cloud attestation. **There is an early-access source checkout, not a stable package/PyPI release.**
 
-## Ready-to-submit channel copy (post each at most once, tailored to channel)
+## Channel drafts (unpublished; owner review before submission)
+
+The complete [V2EX, DEV and Show HN drafts](launch/README.md) accompany a [40-second output replay, cover and subtitles](assets/launch/README.md). These are prepared materials, not completed off-GitHub publications.
 
 ### Hacker News — Show HN
 
-**Title:** Show HN: RAEE-Lite – an offline evidence-gap checker for AI-generated code
+Use the [complete submission draft](launch/show-hn.en.md), with a runnable repository URL and an optional author comment describing the four evidence states. The owner should be available to discuss it. Check the [current Show HN guidelines](https://news.ycombinator.com/showhn.html) before submitting.
 
-**URL:** https://github.com/jinxinche/RAEE
+### English technical article — DEV submission on hold
 
-**Optional author comment:**
+The [complete article draft](launch/dev.en.md) includes actual output, reproduction commands, the limitation of user-supplied requirement labels and an AI-assistance disclosure. Its front matter has `published: false` deliberately. [DEV's AI guidelines](https://dev.to/guidelines-for-ai-assisted-articles-on-dev) restrict promotional programs and social-presence campaigns, so do not submit this launch draft there in its current context. Keep it for owner review and a suitable, explicitly chosen channel.
 
-I kept seeing a coding agent describe a change as done because a test returned zero, even when the test didn't exercise the requested behavior. I built a small Python CLI to keep five roles separate: requirements, code changes, checks actually run, execution context, and untested boundaries.
+### V2EX — 分享创造
 
-There's a runnable v0.10.0rc2 source candidate linked directly from the README. You can reproduce an `UNTESTED` requirement in a throwaway directory without any API key or running repository-owned scripts. The project is early access: cloud provenance and independent security review are pending. I'm especially interested in examples where this taxonomy gives a false sense of assurance or misses valid evidence. What would you want from a code-review tool like this?
-
-**Eligibility:** HN's Show HN guidelines require something users can actually run, not only a writeup. The RC checkout is available; verify the demo just before submitting. Submit once through https://news.ycombinator.com/submit from the author's account; don't solicit votes.
-
-### DEV Community — developer article
-
-**Title:** My AI coding agent said “done.” The tests never covered the requirement.
-
-**Tags (editorial suggestions, subject to channel policy):** `ai`, `python`, `testing`, `opensource`
-
-**Opening:**
-
-A passing check is not a proof of the feature you requested. Here's a common failure mode: a smoke test asserts `1 + 1 == 2`, a coding agent reports green tests, and a sign-up validation requirement has never been exercised. A useful evidence report should say `UNTESTED`, not `VERIFIED`.
-
-I built RAEE-Lite as a local-first Python CLI to separate the requested behavior, repository changes, observed commands, the execution context, and unresolved evidence. The CLI intentionally doesn't infer comprehensive test coverage. Its job is narrower: make absent and stale checks visible.
-
-**Full source article:** [Green tests are not the same as verified requirements](green-tests-not-verified-requirements.md). Adapt and expand it with genuine test output before publishing; don't make the published DEV piece a mechanical duplicate of the README. Include the public RC status and feedback link.
-
-Editor: https://dev.to/new (requires author's logged-in account).
+Use the [Chinese draft](launch/v2ex.zh-CN.md) for the [分享创造 node](https://www.v2ex.com/go/create). It asks for installation problems and reproducible state-reporting errors, rather than votes.
 
 ### Reddit — only a community that explicitly permits the post
 
@@ -70,7 +54,7 @@ Editor: https://dev.to/new (requires author's logged-in account).
 
 **Body:**
 
-I work on AI-assisted coding, and I keep running into the gap between “a test passed” and “the user's request was actually validated.” My open-source v0.10.0rc2 prototype, RAEE-Lite, treats requirements, code changes, observed checks, and unknowns as separate evidence roles. There's a runnable 30-second demo on GitHub. The project is early access; I haven't independently verified cross-platform signed CI, and I'm looking for actual false-positive/false-negative examples rather than votes. Would this sort of evidence-gap report be useful in code review? Source and demo: https://github.com/jinxinche/RAEE
+I’m sharing my open-source v0.10.0rc2 prototype, RAEE-Lite, treats requirements, code changes, observed checks, and unknowns as separate evidence roles. GitHub includes a runnable synthetic demo and a 40-second replay of its local output. The project is early access; I haven't independently verified cross-platform signed CI, and I'm looking for actual false-positive/false-negative examples rather than votes. Would this sort of evidence-gap report be useful in code review? Source and demo: https://github.com/jinxinche/RAEE
 
 **Rules:** Read each subreddit's current rules and use its dedicated promotion/share thread if required. Don't mass-post across subreddits, automate comments, ask for karma, or conceal ownership. If self-promotion is forbidden, don't submit.
 
@@ -102,7 +86,7 @@ An AI coding agent can say “done” while its passing test never checks your r
 
 **标题：** AI 编程助手说“修好了”，但绿灯测试真的覆盖了需求吗？
 
-我正在开放测试 RAEE-Lite：一个本地优先、开源的 Python CLI，将需求、代码变更、真实执行过的检查、运行环境和未验证边界分开记录。比如“注册接口必须拒绝非法邮箱”，即使无关的单元测试全绿，需求仍会标注 `UNTESTED`。源码候选版已经公开，README 提供可运行的 30 秒演示。它并不能证明程序正确或已通过独立安全审计；我希望征集真实的误报、漏报和易用性反馈：https://github.com/jinxinche/RAEE
+我正在开放测试 RAEE-Lite：一个本地优先、开源的 Python CLI，将需求、代码变更、真实执行过的检查、运行环境和未验证边界分开记录。比如“注册接口必须拒绝非法邮箱”，即使无关的单元测试全绿，需求仍会标注 `UNTESTED`。源码候选版已经公开，README 提供可运行的合成示例和 40 秒本地输出回放。它并不能证明程序正确或已通过独立安全审计；我希望征集真实的误报、漏报和易用性反馈：https://github.com/jinxinche/RAEE
 
 ### Deutsch — technische Community
 
@@ -124,13 +108,13 @@ RAEE-Lite es una CLI local y de código abierto para separar los requisitos de u
 
 **Description:** An offline Python CLI that keeps requested behavior, source changes and observed checks separate, highlighting stale or missing evidence instead of treating green tests as proof of a feature.
 
-**Maker comment:** I built this because “the agent says it passed” isn't the same as “the requested feature was covered.” A reproducible local demo shows a requirement remaining UNTESTED. This is an early source-release candidate with deliberately limited claims. I want feedback about missing evidence and usability, not coordinated upvotes.
+**Maker comment:** “The agent says it passed” is not the same as “the requested feature was covered.” A reproducible local demo shows a requirement remaining UNTESTED. This is an early source-release candidate with deliberately limited claims. I want feedback about missing evidence and usability, not coordinated upvotes.
 
-**Hold launch until:** tested release/archive, reliable independent installation, cross-platform CI proof, demo capture and authentic product visuals. Product Hunt emphasizes working, immediately usable products and prohibits asking for upvotes. No launch is currently claimed.
+**Separate release-readiness checks:** versioned release/archive, independent installation, exact-release cross-platform CI, protected-main acceptance and independent provenance verification. Demo media are available; their presence does not complete the remaining checks. Product Hunt emphasizes working, immediately usable products and prohibits asking for upvotes. No launch is currently claimed.
 
 ## Practical publication sequence / attribution
 
-**Phase A — public beta feedback:** Main-branch README and a genuine GitHub issue first. Then **one** relevant technical channel (e.g. DEV or Show HN) with an immediately runnable source demo. Be available to answer genuine questions.
+**Phase A — public beta feedback:** Main-branch README and a genuine GitHub issue first. Then **one** relevant technical channel (e.g. V2EX 分享创造 or Show HN) with an immediately runnable source demo. Be available to answer genuine questions.
 
 **Phase B — social distribution:** LinkedIn, Bluesky and X only from the owner's actually connected accounts; vary framing rather than publishing identical blocks simultaneously. If using Metricool, connect the intended social networks to the brand first. Publishing to a social tool is not achieved by merely writing the copy.
 
@@ -142,7 +126,6 @@ Use the private [Traffic dashboard](https://github.com/jinxinche/RAEE/graphs/tra
 
 ## Owner action links
 
-- Connect Metricool accounts: https://app.metricool.com/brands/connections?blogId=7736413
 - Hacker News submit: https://news.ycombinator.com/submit
 - DEV article editor: https://dev.to/new
 - Reddit: choose a specific subreddit and inspect its live rules before posting

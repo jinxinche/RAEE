@@ -1,0 +1,12 @@
+1. Unrelated arithmetic test passes
+  R1: UNTESTED
+2. A requirement-linked test exposes the bug
+  R1: FAILED_CHECK
+3. The toy fix passes the two example tests
+  R1: OBSERVED_PASS
+4. Source changes after the recorded check
+  R1: STALE
+
+Demo passed; scratch files removed.
+OBSERVED_PASS records a labelled command result, not complete coverage.
+The toy '@' check is not a production email validator.
