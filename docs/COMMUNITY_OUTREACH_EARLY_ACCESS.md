@@ -1,10 +1,24 @@
 # RAEE-Lite — Early-access community outreach kit
 
-**Campaign state (29 October 2026):** Public open-source preview, **v0.10.0rc2 source on a review branch**, not yet merged into default `main`. This is an editorial kit, **not evidence that any off-GitHub post has been published**.
+**Campaign state (9 November 2026):** Public open-source preview, **v0.10.0rc2 source merged into `main`**, including [PR #14](https://github.com/jinxinche/RAEE/pull/14). This is an editorial kit, **not evidence that any off-GitHub post has been published**.
 
 Canonical destination: https://github.com/jinxinche/RAEE
 
-Working source: https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2
+Working source: https://github.com/jinxinche/RAEE/tree/main
+
+Runnable demo and expected output: https://github.com/jinxinche/RAEE/blob/main/examples/DEMO.md
+
+## Repository discovery details
+
+- **About:** Track what AI coding agents actually tested. A local Python CLI for requirement-linked evidence, stale-check detection, and reviewable reports. MIT licensed; no AI API key required for core checks.
+- **Website field:** the runnable demo page above. It is a documentation link, not a separately deployed product site.
+- **Topics:** `python`, `cli`, `developer-tools`, `ai-assisted-coding`, `coding-agents`, `evidence-tracking`, `software-testing`, `github-actions`, `provenance`, `reproducibility`.
+- **First audience:** developers using coding agents and reviewers checking the evidence behind a change.
+- **First action:** run the synthetic demo, then report an expected-versus-observed state with Python/OS details in the feedback issue.
+
+GitHub's About and Topics fields are repository settings; editing this file alone does not update them.
+
+## Reference links
 
 Technical explainer: https://github.com/jinxinche/RAEE/blob/main/docs/green-tests-not-verified-requirements.md
 
@@ -106,7 +120,7 @@ RAEE-Lite es una CLI local y de código abierto para separar los requisitos de u
 
 **Name:** RAEE-Lite
 
-**Tagline:** See what your AI coding agent actually verified
+**Tagline:** Track what your AI coding agent actually tested
 
 **Description:** An offline Python CLI that keeps requested behavior, source changes and observed checks separate, highlighting stale or missing evidence instead of treating green tests as proof of a feature.
 
@@ -123,6 +137,8 @@ RAEE-Lite es una CLI local y de código abierto para separar los requisitos de u
 **Phase C — full release launch:** After protected-main CI, authentic artifact signing and independent verification, run a separate Product Hunt launch; do not call a source-review preview a stable trusted release.
 
 Track **actual** repository views and unique visitors (GitHub Insights), issue reports, attempted installations, meaningful replies and repeat contributors. No fabricated traffic, stars or engagement. A number is an observed metric only when retrieved from the provider.
+
+Use the private [Traffic dashboard](https://github.com/jinxinche/RAEE/graphs/traffic) to record the date range, views, unique visitors and referrers before and after a specific post. Keep account-only analytics out of public issue reports. Few visitors suggest limited exposure; visits without feedback are a prompt to investigate the onboarding, not proof that the project lacks value. Clone counts and unique cloners may include CI, automation and repeat infrastructure, so they are not adoption counts. Do not divide all-time stars by a rolling 14-day visitor count and call it a conversion rate.
 
 ## Owner action links
 

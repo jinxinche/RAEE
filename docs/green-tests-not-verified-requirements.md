@@ -23,7 +23,7 @@ That test tells us nothing about input validation. Neither does a successful `py
 
 [RAEE-Lite](https://github.com/jinxinche/RAEE) is a Python CLI that maintains **separate roles** for requirement intent, source changes, checks actually performed, the execution environment, and untested boundaries.
 
-The [v0.10.0rc2 source candidate](https://github.com/jinxinche/RAEE/tree/release/raee-lite-v0.10.0rc2) is public for review; it is **not** yet a stable, independently security-audited release. Install only after reviewing the code, preferably in a disposable virtual environment.
+The [v0.10.0rc2 source candidate](https://github.com/jinxinche/RAEE/tree/main) is merged into `main`; it is **not** yet a stable, independently security-audited release. Install only after reviewing the code, preferably in a disposable virtual environment. The [one-command demo](../examples/DEMO.md) reproduces four evidence states using standard-library tests and no AI service.
 
 In a clean temporary project directory, try:
 
@@ -57,20 +57,20 @@ The tool does **not** claim to solve test generation, prove program correctness,
 
 An observed check should be tied to the code state on which it actually ran. If the user edits the code afterward, a tool should not automatically reuse the old result as if the new revision were tested.
 
-The project's [longer reproducible demo](https://github.com/jinxinche/RAEE/blob/release/raee-lite-v0.10.0rc2/examples/DEMO.md) demonstrates the separation between an unrelated green check and a requirement that remains untested, then modifies the source to make previous evidence stale.
+The project's [reproducible demo](../examples/DEMO.md) demonstrates an unrelated green check with an untested requirement, a relevant failing check, a passing check after a toy fix, and a later source change that makes the recorded evidence stale.
 
 This is **a narrower goal than automated software verification**. Narrower, explicit claims make a verification workflow more auditable.
 
 ## What this project is—and is not—ready for
 
-The public v0.10.0rc2 branch contains Python source, tests, CLI workflows and a candidate GitHub Actions provenance chain. Local tests and synthetic attack cases have been executed, but the release has **not yet completed independent security review, protected-main cross-platform CI acceptance, or a real GitHub Artifact Attestation verified from another environment**.
+The public v0.10.0rc2 source on `main` contains Python code, tests, CLI workflows and a candidate GitHub Actions provenance chain. [PR #14](https://github.com/jinxinche/RAEE/pull/14) is merged, and its [main-branch cross-platform CI run](https://github.com/jinxinche/RAEE/actions/runs/42082362410) passed on `555bc92`. The release has **not yet completed independent security review, branch-protection acceptance, or a real GitHub Artifact Attestation verified from another environment**.
 
 No proof of these missing steps is implied by this article or by a green PR risk-inventory job. This is an **early-access, source-review project**. The goal of this public preview is to discover where the evidence taxonomy and importers produce false confidence or miss legitimate signals.
 
 If you use Codex, Claude Code, or another coding agent, I would be interested in one **sanitized minimal reproduction** of an agent claiming completion while the actual executed checks fail to cover the requirement. Avoid sharing raw agent logs, secrets, private repository code, or access tokens.
 
 - [Project and four-language README](https://github.com/jinxinche/RAEE)
-- [Public source release candidate](https://github.com/jinxinche/RAEE/pull/2)
+- [Public source release candidate](https://github.com/jinxinche/RAEE/tree/main)
 - [Open a reproducible issue](https://github.com/jinxinche/RAEE/issues/new)
 
 ## Research inspiration — not software validation

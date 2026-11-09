@@ -1,20 +1,40 @@
 # RAEE-Lite
 
-**The evidence layer for AI-assisted coding.**
+**Track what your AI coding agent actually tested.**
 
 > Your coding agent wrote the code. RAEE-Lite helps you see what was actually checked—and what remains unproven.
+
+A local Python CLI that links requirements to recorded checks, flags stale evidence after source changes, and produces reports for code review.
 
 [English](README.md) · [简体中文](docs/README.zh-CN.md) · [Deutsch](docs/README.de-DE.md) · [Español](docs/README.es-ES.md)
 
 **Release:** `v0.10.0rc2` candidate · **License:** MIT · **Python:** 3.10+ · **No AI API key required for core offline checks**
 
+[Run the demo](examples/DEMO.md) · [Install](#try-the-public-release-candidate) · [Read a concrete example](docs/green-tests-not-verified-requirements.md) · [Share feedback](https://github.com/jinxinche/RAEE/issues/7)
+
+### See the difference
+
+For developers using coding agents and reviewers asking what a change actually tested:
+
+| Situation | What RAEE-Lite makes visible |
+| --- | --- |
+| An unrelated smoke test passes | The requirement still has no matching receipt: `UNTESTED` |
+| A linked test fails | The recorded check failed: `FAILED_CHECK` |
+| The linked test passes after a fix | A labelled command passed: `OBSERVED_PASS` |
+| Source changes after that check | The old result no longer applies: `STALE` |
+
+```mermaid
+flowchart LR
+    A[UNTESTED] -->|Run a linked test| B[FAILED_CHECK]
+    B -->|Fix and rerun| C[OBSERVED_PASS]
+    C -->|Edit source| D[STALE]
+```
+
+This is the path taken by the [runnable synthetic demo](examples/DEMO.md), not the complete state machine. Requirement links and check kinds are supplied by the user; RAEE-Lite does not infer semantic test coverage. `OBSERVED_PASS` is not proof that a feature is correct.
+
 ### Try the public release candidate
 
-**Status: public source release candidate, not a stable or security-certified release.** This repository includes the CLI source and installation metadata. Independent provenance verification and branch-protection acceptance remain separate release gates.
-
-**Merged baseline:** The earlier PR stack is merged into `main` at `5a8cc702674a5e4005f0efe3891b39727c5f7897`. [Main CI run 41978577201](https://github.com/jinxinche/RAEE/actions/runs/41978577201) passed all six OS/Python jobs with 268 tests per job. Those results apply to that baseline.
-
-**Working candidate (2026-11-06):** The regression suite includes dedicated negative controls from two rounds of focused review tasks. The PR description and Checks tab record validation against its exact head commit, including the twelve-job hosted matrix. See the [first engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md) and [follow-up audit](docs/ENGINEERING_FOLLOWUP_2026-11-06.md) for changes and remaining acceptance work.
+**Status: public source release candidate, not a stable or security-certified release.** Core checks run locally without an AI API key. Independent provenance verification and branch-protection acceptance remain separate release gates.
 
 Try it from a **disposable Python environment**, after inspecting the source:
 
@@ -22,12 +42,19 @@ Try it from a **disposable Python environment**, after inspecting the source:
 git clone https://github.com/jinxinche/RAEE.git
 cd RAEE
 python -m venv .venv
-# Activate the venv using your platform's standard command
-python -m pip install --no-deps .
-raee-lite --version
 ```
 
-Inside a fresh, disposable project directory:
+Activate the environment with `source .venv/bin/activate` on macOS/Linux, or `.venv\Scripts\Activate.ps1` in PowerShell. If activation is unavailable, use `.venv/bin/python` or `.venv\Scripts\python.exe` in place of `python` below.
+
+```bash
+python -m pip install --no-deps .
+python -m raee_lite --version
+python examples/run_demo.py
+```
+
+The demo runs tiny, inspectable standard-library tests in a temporary project and removes it afterward. It needs no `pytest`, AI service, or private agent logs. [Expected output and explanations](examples/DEMO.md).
+
+To inspect a project without executing its tests, start in a fresh, disposable project directory:
 
 ```bash
 raee-lite init
@@ -131,9 +158,11 @@ See [the research citation](REFERENCES.bib). If you use the software, cite the s
 
 ## Roadmap and project status
 
-The near-term priorities are hosted verification of the current candidate, branch-protection acceptance, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
+The near-term priorities are branch-protection acceptance, authentic artifact attestations, consented real-world agent-log benchmarks, and external security review.
 
-**Current status: the earlier stack is merged with a passing six-job main CI run; candidate validation is recorded against the exact PR head in its description and Checks tab.** Branch-protection acceptance and independent provenance verification remain pending. Please do not interpret the README as a claim of production readiness.
+**Verified baseline (2026-11-09):** [PR #14](https://github.com/jinxinche/RAEE/pull/14) is merged at `555bc92094760cebaeab0587e8b210e98d454d2e`. Its [main-branch CI run](https://github.com/jinxinche/RAEE/actions/runs/42082362410) passed. Before merging, [all twelve matrix jobs and the regression gate](https://github.com/jinxinche/RAEE/actions/runs/42076872999) passed on `ecbd66e`: 741 tests collected per job, with eight explicit platform skips on Windows and zero skips elsewhere. These results belong to those commits, not every later revision.
+
+See the [first engineering audit](docs/ENGINEERING_AUDIT_2026-11-05.md) and [follow-up audit](docs/ENGINEERING_FOLLOWUP_2026-11-06.md) for changes and limitations. Branch-protection acceptance and independent provenance verification remain pending. This is not a claim of production readiness.
 
 The candidate's [trusted test workflow](.github/workflows/tests.yml) defines twelve regression jobs: Ubuntu Python 3.10–3.15; Windows and macOS Intel Python 3.10/3.15; macOS ARM64 Python 3.10/3.15. It adds Ubuntu 3.11–3.14 and both ARM64 jobs to the historical six-job matrix. Each job is configured to build and exercise an installed package, run the full regression gate and validate the synthetic corpus with `--require-exact`; a final gate requires every matrix job to succeed. Verify the completed run against the candidate's exact head commit in the PR Checks tab. The regression runner centrally maintains total and per-module minima; see [CONTRIBUTING](CONTRIBUTING.md) for commands that use those defaults.
 
@@ -144,6 +173,8 @@ The current candidate also retains execution-time scope audits, treats dynamic-i
 ## Community discussion
 
 Have a reproducible example of an AI agent claiming "done" without matching evidence? Join the [early-access feedback thread](https://github.com/jinxinche/RAEE/issues/7). Please share only minimal, sanitized examples.
+
+Useful feedback includes the command you tried, your Python/OS version, the status you expected, and the status you observed. Start with the synthetic demo; no private project or conversation is needed.
 
 For developers who wish to write about this project, see the [technical explainer](docs/green-tests-not-verified-requirements.md) and [multilingual community outreach guide](docs/COMMUNITY_OUTREACH_EARLY_ACCESS.md). The latter contains drafts, **not published posts or verified reach metrics**.
 
