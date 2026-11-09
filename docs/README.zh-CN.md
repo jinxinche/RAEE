@@ -2,9 +2,33 @@
 
 **让 AI 编程有证据，而不只是有“已完成”的回答。**
 
+RAEE-Lite 是一个本地 Python 命令行工具：把需求和实际检查记录关联起来，在代码修改后标记过期证据，并生成供代码审查使用的报告。
+
 [English](../README.md) · [简体中文](README.zh-CN.md) · [Deutsch](README.de-DE.md) · [Español](README.es-ES.md)
 
-**公开候选版本现已提供源码：** [main 分支源码](https://github.com/jinxinche/RAEE/tree/main) · [已合并的 PR #2](https://github.com/jinxinche/RAEE/pull/2) · [2026-11-05 工程审计与验证状态](ENGINEERING_AUDIT_2026-11-05.md)。仓库现已包含 CLI 源码与安装配置；尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。可在隔离环境检查和安装候选源码，尝试 `raee-lite init`、`raee-lite add "注册必须拒绝无效邮箱"`、`raee-lite expect --for R1 --kind unit`、`raee-lite status`。预期结果为 `UNTESTED`；未验证需求导致 `status` 返回码 1 是有意设计，非程序崩溃。 默认不会执行项目测试。
+[运行演示](../examples/DEMO.md) · [安装说明](../README.md#try-the-public-release-candidate) · [反馈案例](https://github.com/jinxinche/RAEE/issues/7)
+
+**公开候选版本已合入主干：** [main 分支源码](https://github.com/jinxinche/RAEE/tree/main) · [已合并的 PR #14](https://github.com/jinxinche/RAEE/pull/14) · [工程审计与验证边界](ENGINEERING_FOLLOWUP_2026-11-06.md)。目前仍为 `v0.10.0rc2` 候选版本，尚无稳定版、PyPI 正式发布或经独立验证的云端安全签名。
+
+## 先看一个可运行的例子
+
+在 Python 3.10+ 虚拟环境中，从检查过的源码目录运行：
+
+```bash
+python -m pip install --no-deps .
+python examples/run_demo.py
+```
+
+演示使用 Python 标准库，在自动清理的临时目录中执行小型合成测试；无需 AI API 密钥、`pytest` 或私人日志。实际展示四个状态：
+
+| 场景 | 结果 |
+| --- | --- |
+| 无关的算术测试通过，尚无需求关联记录 | `UNTESTED`：需求未验证 |
+| 给注册函数添加相关测试，发现错误 | `FAILED_CHECK`：检查失败 |
+| 修复示例函数后，两项示例测试通过 | `OBSERVED_PASS`：观察到该命令通过 |
+| 检查后再次修改源文件 | `STALE`：旧证据过期 |
+
+需求关联和检查类别由用户指定；工具不会自动判断语义覆盖率。示例只检查邮箱中是否含有 `@`，并非生产级邮箱校验。详见[完整输出与说明](../examples/DEMO.md)。
 
 
 ## 为什么需要 RAEE-Lite？
@@ -47,7 +71,7 @@ raee-lite check       # 生成证据缺口报告
 - 退出码为 0 仅说明对应命令完成，不代表需求、测试质量或安全性得到证明。
 - Docker 隔离不等同于经过安全认证的虚拟机沙盒。
 - 证据签名可以帮助验证来源和完整性，但不能证明测试结论真实充分。
-- 跨平台回归记录见 [PR #13](https://github.com/jinxinche/RAEE/pull/13)；真实用户日志兼容率、独立来源验证和安全审计仍需另行验证。
+- 跨平台回归记录见 [PR #14](https://github.com/jinxinche/RAEE/pull/14)；真实用户日志兼容率、独立来源验证和安全审计仍需另行验证。
 
 ## 研究来源与预印本引用
 
@@ -61,6 +85,8 @@ raee-lite check       # 生成证据缺口报告
 
 ## 项目现状
 
-当前优先任务是公开可审查源码、取得真实 Linux / Windows / macOS CI 结果、完成独立 Artifact Attestation 验证，并通过授权的真实日志建立评测集。
+截至 2026-11-09，[PR #14](https://github.com/jinxinche/RAEE/pull/14) 已合并为 `555bc92`，对应的[主干 CI](https://github.com/jinxinche/RAEE/actions/runs/42082362410) 已通过。合并前的[十二组跨平台检查](https://github.com/jinxinche/RAEE/actions/runs/42076872999)在 `ecbd66e` 上每组收集 741 项测试：Windows 每组 8 项明确的平台跳过，其余平台无跳过。验证结果仅适用于对应提交。
+
+接下来的优先任务是主干保护验收、独立 Artifact Attestation 验证、授权的真实日志评测及外部安全审查。
 
 许可证：[MIT](../LICENSE)。欢迎未来提交规范的复现案例、翻译改进和安全反馈，但不要在公开 Issue 中上传密钥或私人会话。
